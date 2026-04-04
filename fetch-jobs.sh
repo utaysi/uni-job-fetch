@@ -115,11 +115,17 @@ def extract_main_page_jobs(content):
             title = f'{title} ({seen_names[title]})'
         else:
             seen_names[title] = 1
+        safe_source = 'Main_Page'
+        safe_title = re.sub(r'[^\w\s\-()]', '', title)
+        safe_title = re.sub(r'\s+', '_', safe_title.strip())
+        filename = f'{safe_source}__{safe_title}.pdf'
+        
         jobs.append({
             'title': title,
             'pdf_href': pdf_href,
             'date': date_cell,
-            'source': 'Main Page'
+            'source': 'Main Page',
+            'filename': filename
         })
     return jobs
 
@@ -158,11 +164,18 @@ def extract_subpage_jobs(content, source_name, page_url):
         else:
             seen_names[title] = 1
         
+        safe_source = re.sub(r'[^\w\s\-()]', '', source_name)
+        safe_source = re.sub(r'\s+', '_', safe_source.strip())
+        safe_title = re.sub(r'[^\w\s\-()]', '', title)
+        safe_title = re.sub(r'\s+', '_', safe_title.strip())
+        filename = f'{safe_source}__{safe_title}.pdf'
+        
         jobs.append({
             'title': title,
             'pdf_href': pdf_href,
             'date': date_str,
-            'source': source_name
+            'source': source_name,
+            'filename': filename
         })
     return jobs
 
