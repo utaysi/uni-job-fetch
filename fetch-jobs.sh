@@ -6,6 +6,8 @@ set -euo pipefail
 
 URL="https://www.uni-marburg.de/de/universitaet/administration/verwaltung/dezernat2/personalabteilung/bewerber/stud-und-wiss-hilfskraftstellen"
 SEARCH_NAME="Matthias"
+NOTIFY_TOPIC=""
+CLEANUP=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -13,8 +15,16 @@ while [[ $# -gt 0 ]]; do
             SEARCH_NAME="$2"
             shift 2
             ;;
+        --notify)
+            NOTIFY_TOPIC="$2"
+            shift 2
+            ;;
+        --cleanup)
+            CLEANUP=true
+            shift
+            ;;
         *)
-            echo "Usage: $0 [--name <search_string>]"
+            echo "Usage: $0 [--name <search_string>] [--notify <ntfy_topic>] [--cleanup]"
             exit 1
             ;;
     esac
@@ -166,6 +176,32 @@ echo ""
 # Search PDFs for the name
 echo "=== Searching PDFs for \"$SEARCH_NAME\" ==="
 echo ""
-pdfgrep -ri "$SEARCH_NAME" "$OUTDIR"/ || echo "(No matches found for \"$SEARCH_NAME\")"
+MATCHES=$(pdfgrep -ri "$SEARCH_NAME" "$OUTDIR"/ 2>/dev/null || true)
+
+if [[ -n "$MATCHES" ]]; then
+    echo "$MATCHES"
+    echo ""
+
+    # Send notification if --notify was set
+    if [[ -n "$NOTIFY_TOPIC" ]]; then
+        echo "Sending ntfy notification to topic: $NOTIFY_TOPIC"
+        curl -s \
+            -H "Title: Uni Job Match: $SEARCH_NAME" \
+            -H "Priority: high" \
+            -H "Tags: briefcase" \
+            -d "$MATCHES" \
+            "https://ntfy.sh/$NOTIFY_TOPIC" > /dev/null
+    fi
+else
+    echo "(No matches found for \"$SEARCH_NAME\")"
+fi
+
 echo ""
+
+# Cleanup if requested
+if [[ "$CLEANUP" == true ]]; then
+    echo "Cleaning up: removing $OUTDIR"
+    rm -rf "$OUTDIR"
+fi
+
 echo "Done."
