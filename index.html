@@ -698,12 +698,15 @@ function updateSourceChips() {
 
 function buildFetchChips() {
   const fetches = [...new Set(allJobs.map(j => j._dir))].sort();
+  const latest = fetches[fetches.length - 1];
   const container = document.getElementById('fetchChips');
   container.innerHTML = '';
 
+  // Default to showing only the most recent fetch; older fetches can be toggled on.
   fetches.forEach(f => {
     const chip = document.createElement('button');
-    chip.className = 'fetch-chip active';
+    const isLatest = f === latest;
+    chip.className = isLatest ? 'fetch-chip active' : 'fetch-chip';
     chip.textContent = fetchLabel(f);
     chip.dataset.fetch = f;
     chip.addEventListener('click', () => {
@@ -716,7 +719,7 @@ function buildFetchChips() {
       render();
     });
     container.appendChild(chip);
-    activeFetches.add(f);
+    if (isLatest) activeFetches.add(f);
   });
 }
 
@@ -945,7 +948,8 @@ document.getElementById('clearFilters').addEventListener('click', () => {
   Object.keys(sourceCounts).forEach(s => activeSources.add(s));
   updateSourceChips();
   activeFetches.clear();
-  [...new Set(allJobs.map(j => j._dir))].forEach(f => activeFetches.add(f));
+  const fetches = [...new Set(allJobs.map(j => j._dir))].sort();
+  if (fetches.length) activeFetches.add(fetches[fetches.length - 1]);
   updateFetchChips();
   render();
 });
