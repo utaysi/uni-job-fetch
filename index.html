@@ -623,6 +623,11 @@ function parseDate(str) {
   return new Date(y, m - 1, d);
 }
 
+// _dir is like "jobs/jobs_2026-05-27_11-04-59"; show just the timestamp.
+function fetchLabel(dir) {
+  return dir.split('/').pop().replace('jobs_', '');
+}
+
 function formatDate(str) {
   if (!str) return '';
   const [d, m, y] = str.split('.');
@@ -699,7 +704,7 @@ function buildFetchChips() {
   fetches.forEach(f => {
     const chip = document.createElement('button');
     chip.className = 'fetch-chip active';
-    chip.textContent = f.replace('jobs_', '');
+    chip.textContent = fetchLabel(f);
     chip.dataset.fetch = f;
     chip.addEventListener('click', () => {
       if (activeFetches.has(f)) {
@@ -776,7 +781,7 @@ function renderJobs(jobs) {
           <div class="job-title">${j.title}</div>
           <div class="job-meta">
             <span>${j.source}</span>
-            <span>${j._dir.replace('jobs_', '')}</span>
+            <span>${fetchLabel(j._dir)}</span>
           </div>
         </div>
         <div class="job-deadline">
@@ -922,7 +927,7 @@ fetch('jobs_data.json')
   .catch(err => {
     document.getElementById('jobsList').innerHTML = `
       <div class="empty-state">
-        <p>Failed to load jobs_data.json. Run <code>./generate-data.sh</code> first.</p>
+        <p>Failed to load jobs_data.json. Run <code>py jobs.py fetch</code> first.</p>
       </div>
     `;
     console.error(err);

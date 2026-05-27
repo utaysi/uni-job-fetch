@@ -28,6 +28,7 @@ logging.getLogger('pypdf').setLevel(logging.ERROR)
 
 MAIN_URL = "https://www.uni-marburg.de/de/universitaet/administration/verwaltung/dezernat2/personalabteilung/bewerber/stud-und-wiss-hilfskraftstellen"
 DEFAULT_NAME = "Matthias"
+JOBS_ROOT = "jobs"  # all timestamped fetch folders live under here
 
 # Subpages to also fetch, with their display names.
 SUBPAGES = [
@@ -244,7 +245,7 @@ def cmd_fetch(args):
         cleanup = True
 
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    outdir = f'jobs_{timestamp}'
+    outdir = os.path.join(JOBS_ROOT, f'jobs_{timestamp}')
     os.makedirs(outdir, exist_ok=True)
 
     print('=== Uni Marburg Job Fetcher ===')
@@ -320,11 +321,13 @@ def cmd_fetch(args):
 
 
 def load_all_jobs():
-    # Only fetch directories, not jobs_data.json which also matches jobs_*.
-    dirs = sorted(d for d in glob.glob('jobs_*') if os.path.isdir(d))
+    # Fetch directories live under JOBS_ROOT. Normalise to forward slashes so the
+    # stored _dir works as a URL path in the dashboard even on Windows.
+    pattern = os.path.join(JOBS_ROOT, 'jobs_*')
+    dirs = sorted(d.replace(os.sep, '/') for d in glob.glob(pattern) if os.path.isdir(d))
     all_jobs = []
     for d in dirs:
-        jpath = os.path.join(d, '_jobs.json')
+        jpath = f'{d}/_jobs.json'
         if os.path.exists(jpath):
             with open(jpath, encoding='utf-8') as f:
                 jobs = json.load(f)

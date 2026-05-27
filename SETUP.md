@@ -1,3 +1,8 @@
+> Author: 
+**Ugur Taysi**  
+Assistant Staff Council Member  
+taysiug@students.uni-marburg.de
+
 # Windows Setup
 
 ## 1. Install Python
@@ -71,5 +76,6 @@ schtasks /query  /tn "UniJobFetch"     # show status
 schtasks /delete /tn "UniJobFetch" /f  # remove it
 ```
 
-The fetched `jobs_*` folders and `jobs_data.json` are always written next to `jobs.py`, so the
+Each fetch is saved as a timestamped folder inside a `jobs/` directory next to `jobs.py`, and
+`jobs_data.json` is written alongside `jobs.py`. These paths are relative to the script, so the
 task's working directory doesn't matter as long as the full path to `jobs.py` is in the command.
