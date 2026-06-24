@@ -27,7 +27,7 @@ import store
 
 logging.getLogger('fitz').setLevel(logging.ERROR)
 
-PDF_DIR = 'pdfs'
+PDF_DIR = 'data/pdfs'
 
 
 def _sanitize(name):
@@ -169,9 +169,10 @@ def build_parser():
 
 
 def main():
-    # Operate relative to the script so the DB, pdfs/, and dashboard live together
-    # regardless of where the command (or a scheduler) was launched.
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    # Operate relative to the project root (the parent of src/) so the DB,
+    # data/pdfs/, dashboard, and job_ads.xlsx live together regardless of where
+    # the command (or a scheduler) was launched.
+    os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     parser = build_parser()
     args = parser.parse_args()
     if not args.command:

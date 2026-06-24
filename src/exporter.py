@@ -52,7 +52,7 @@ COLUMNS = [
     ('PDF', 'pdf', 'pdf'),
 ]
 
-PDF_DIR = 'pdfs'
+PDF_DIR = 'data/pdfs'
 
 
 def _date_or_text(value):

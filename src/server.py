@@ -1,12 +1,16 @@
 """Dashboard HTTP server.
 
-Serves the static dashboard (index.html) and a live JSON view of the DB at
-/api/jobs and the stored PDFs under /pdfs/. No data file is written to disk; the
-DB is queried per request so the dashboard always reflects the current state.
+Serves the static dashboard (web/index.html) and a live JSON view of the DB at
+/api/jobs and the stored PDFs under /pdfs/ (on disk in data/pdfs/). No data file
+is written to disk; the DB is queried per request so the dashboard always
+reflects the current state.
 """
 
 import http.server
 import json
+import os
+import posixpath
+import urllib.parse
 
 import store
 
@@ -55,6 +59,19 @@ def make_handler(db_path):
                 self.wfile.write(body)
                 return
             super().do_GET()
+
+        def translate_path(self, path):
+            # The dashboard lives in web/ and the PDFs in data/pdfs/, but they are
+            # served from a single URL space rooted at the project directory (cwd).
+            # Map the URL onto disk: /pdfs/... -> data/pdfs/..., everything else
+            # -> web/... (so '/' resolves to web/index.html).
+            clean = urllib.parse.unquote(path.split('?', 1)[0].split('#', 1)[0])
+            rel = posixpath.normpath(clean).lstrip('/')
+            if rel == 'pdfs' or rel.startswith('pdfs/'):
+                base = os.path.join(os.getcwd(), 'data')
+            else:
+                base = os.path.join(os.getcwd(), 'web')
+            return os.path.join(base, *rel.split('/'))
 
         def log_message(self, *args):
             pass  # quiet

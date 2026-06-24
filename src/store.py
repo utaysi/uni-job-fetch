@@ -11,7 +11,7 @@ import os
 import sqlite3
 from datetime import datetime
 
-DB_PATH = 'jobs.db'
+DB_PATH = 'data/jobs.db'
 
 # Parsed field columns (everything the extractor produces that we persist).
 PARSED_FIELDS = [
