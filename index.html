@@ -546,7 +546,7 @@ body {
       </div>
       <div class="header-stat">
         <div class="header-stat-value" id="sourcesCount">0</div>
-        <div class="header-stat-label">Sources</div>
+        <div class="header-stat-label">Departments</div>
       </div>
     </div>
   </div>
@@ -556,7 +556,7 @@ body {
   <aside class="sidebar">
     <div class="panel">
       <div class="panel-header">
-        Sources
+        Departments
         <span id="sourceFilterCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
       </div>
       <div class="panel-body" id="sourceList"></div>
@@ -574,7 +574,7 @@ body {
     </div>
 
     <div class="panel">
-      <div class="panel-header">Fetch Date</div>
+      <div class="panel-header">Status</div>
       <div class="fetch-chips" id="fetchChips"></div>
     </div>
   </aside>
@@ -582,7 +582,7 @@ body {
   <main class="main">
     <div class="charts-grid">
       <div class="chart-panel">
-        <h3>Jobs by Source</h3>
+        <h3>Jobs by Department</h3>
         <div class="chart-container"><canvas id="sourceChart"></canvas></div>
       </div>
       <div class="chart-panel">
@@ -613,26 +613,38 @@ const COLORS = [
 
 let allJobs = [];
 let activeSources = new Set();
-let activeFetches = new Set();
+let activeStatuses = new Set();
 let sourceChart = null;
 let timelineChart = null;
 
+const STATUS_FILTERS = ['Online', 'Offline', 'Needs Review'];
+
+// Deadlines arrive as dd.mm.yyyy, yyyy-mm-dd, or free text. Return a Date or null.
 function parseDate(str) {
   if (!str) return null;
-  const [d, m, y] = str.split('.');
-  return new Date(y, m - 1, d);
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  m = /(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})/.exec(str);
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+  return null;
 }
 
-// _dir is like "jobs/jobs_2026-05-27_11-04-59"; show just the timestamp.
-function fetchLabel(dir) {
-  return dir.split('/').pop().replace('jobs_', '');
+function jobTitle(j) {
+  return j.position_title || j.job_id || j.original_pdf_name || 'Untitled';
 }
 
 function formatDate(str) {
-  if (!str) return '';
-  const [d, m, y] = str.split('.');
+  const d = parseDate(str);
+  if (!d) return str || '';
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${parseInt(d)} ${months[parseInt(m)-1]} ${y}`;
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function jobMatchesStatus(j) {
+  if (activeStatuses.has('Needs Review') && j.needs_review) return true;
+  if (activeStatuses.has('Online') && j.status === 'Online') return true;
+  if (activeStatuses.has('Offline') && j.status === 'Offline') return true;
+  return false;
 }
 
 function deadlineStatus(dateStr) {
@@ -655,7 +667,7 @@ let sourceCounts = {};
 function buildSourceList() {
   sourceCounts = {};
   allJobs.forEach(j => {
-    const s = j.source || 'Unknown';
+    const s = j.department || 'Unknown';
     sourceCounts[s] = (sourceCounts[s] || 0) + 1;
   });
 
@@ -697,35 +709,32 @@ function updateSourceChips() {
 }
 
 function buildFetchChips() {
-  const fetches = [...new Set(allJobs.map(j => j._dir))].sort();
-  const latest = fetches[fetches.length - 1];
   const container = document.getElementById('fetchChips');
   container.innerHTML = '';
-
-  // Default to showing only the most recent fetch; older fetches can be toggled on.
-  fetches.forEach(f => {
+  // Default to showing only Online ads; Offline and Needs Review are opt-in.
+  STATUS_FILTERS.forEach(s => {
     const chip = document.createElement('button');
-    const isLatest = f === latest;
-    chip.className = isLatest ? 'fetch-chip active' : 'fetch-chip';
-    chip.textContent = fetchLabel(f);
-    chip.dataset.fetch = f;
+    const on = s === 'Online';
+    chip.className = on ? 'fetch-chip active' : 'fetch-chip';
+    chip.textContent = s;
+    chip.dataset.status = s;
     chip.addEventListener('click', () => {
-      if (activeFetches.has(f)) {
-        if (activeFetches.size > 1) activeFetches.delete(f);
+      if (activeStatuses.has(s)) {
+        if (activeStatuses.size > 1) activeStatuses.delete(s);
       } else {
-        activeFetches.add(f);
+        activeStatuses.add(s);
       }
       updateFetchChips();
       render();
     });
     container.appendChild(chip);
-    if (isLatest) activeFetches.add(f);
+    if (on) activeStatuses.add(s);
   });
 }
 
 function updateFetchChips() {
   document.querySelectorAll('.fetch-chip').forEach(chip => {
-    chip.classList.toggle('active', activeFetches.has(chip.dataset.fetch));
+    chip.classList.toggle('active', activeStatuses.has(chip.dataset.status));
   });
 }
 
@@ -735,21 +744,21 @@ function getFilteredJobs() {
   const dateTo = document.getElementById('dateTo').value;
 
   return allJobs.filter(j => {
-    if (!activeSources.has(j.source)) return false;
-    if (!activeFetches.has(j._dir)) return false;
+    if (!activeSources.has(j.department || 'Unknown')) return false;
+    if (!jobMatchesStatus(j)) return false;
 
     if (search) {
-      const inTitle = j.title.toLowerCase().includes(search);
-      const inSource = (j.source || '').toLowerCase().includes(search);
-      if (!inTitle && !inSource) return false;
+      const hay = [jobTitle(j), j.department, j.job_id, j.working_group,
+                   j.contact_name, j.full_text].join(' ').toLowerCase();
+      if (!hay.includes(search)) return false;
     }
 
     if (dateFrom) {
-      const d = parseDate(j.date);
+      const d = parseDate(j.application_deadline);
       if (!d || d < new Date(dateFrom)) return false;
     }
     if (dateTo) {
-      const d = parseDate(j.date);
+      const d = parseDate(j.application_deadline);
       if (!d || d > new Date(dateTo + 'T23:59:59')) return false;
     }
 
@@ -775,20 +784,23 @@ function renderJobs(jobs) {
   }
 
   container.innerHTML = jobs.map((j, i) => {
-    const status = deadlineStatus(j.date);
-    const color = COLORS[Object.keys(sourceCounts).indexOf(j.source) % COLORS.length];
+    const status = deadlineStatus(j.application_deadline);
+    const color = COLORS[Object.keys(sourceCounts).indexOf(j.department || 'Unknown') % COLORS.length];
+    const review = j.needs_review ? '<span style="color:var(--orange)">⚠ review</span>' : '';
+    const offline = j.status === 'Offline' ? '<span style="color:var(--text-muted)">offline</span>' : '';
     return `
-      <div class="job-card" style="animation-delay:${Math.min(i * 0.03, 0.5)}s" onclick="openJob('${j._dir}','${j.filename || ''}')">
+      <div class="job-card" style="animation-delay:${Math.min(i * 0.03, 0.5)}s" onclick="openJob('${encodeURI(j.pdf || '')}')">
         <div class="job-source-badge" style="background:${color}"></div>
         <div class="job-info">
-          <div class="job-title">${j.title}</div>
+          <div class="job-title">${jobTitle(j)}</div>
           <div class="job-meta">
-            <span>${j.source}</span>
-            <span>${fetchLabel(j._dir)}</span>
+            <span>${j.department || 'Unknown'}</span>
+            ${j.job_id ? `<span>${j.job_id}</span>` : ''}
+            ${review} ${offline}
           </div>
         </div>
         <div class="job-deadline">
-          <div class="deadline-date">${j.date ? formatDate(j.date) : '—'}</div>
+          <div class="deadline-date">${j.application_deadline ? formatDate(j.application_deadline) : '—'}</div>
           <div class="deadline-status ${status.cls}">${status.text}</div>
         </div>
       </div>
@@ -796,27 +808,21 @@ function renderJobs(jobs) {
   }).join('');
 }
 
-function openJob(dir, filename) {
-  if (filename) {
-    window.open(`${dir}/${filename}`, '_blank');
-  }
+function openJob(pdf) {
+  if (pdf) window.open(pdf, '_blank');
 }
 
 function updateStats(jobs) {
   document.getElementById('totalJobs').textContent = allJobs.length;
-  const now = new Date();
-  const active = jobs.filter(j => {
-    if (!j.date) return true;
-    return parseDate(j.date) >= now;
-  }).length;
-  document.getElementById('activeJobs').textContent = active;
+  document.getElementById('activeJobs').textContent =
+    allJobs.filter(j => j.status === 'Online').length;
 }
 
 function renderCharts(jobs) {
   // Source chart
   const sourceData = {};
   jobs.forEach(j => {
-    const s = j.source || 'Unknown';
+    const s = j.department || 'Unknown';
     sourceData[s] = (sourceData[s] || 0) + 1;
   });
 
@@ -861,8 +867,8 @@ function renderCharts(jobs) {
   // Timeline chart
   const deadlineMap = {};
   jobs.forEach(j => {
-    if (j.date) {
-      const d = parseDate(j.date);
+    if (j.application_deadline) {
+      const d = parseDate(j.application_deadline);
       if (d) {
         const key = d.toISOString().split('T')[0];
         deadlineMap[key] = (deadlineMap[key] || 0) + 1;
@@ -919,7 +925,7 @@ function render() {
 }
 
 // Init
-fetch('jobs_data.json')
+fetch('/api/jobs')
   .then(r => r.json())
   .then(data => {
     allJobs = data;
@@ -930,7 +936,7 @@ fetch('jobs_data.json')
   .catch(err => {
     document.getElementById('jobsList').innerHTML = `
       <div class="empty-state">
-        <p>Failed to load jobs_data.json. Run <code>py jobs.py fetch</code> first.</p>
+        <p>Failed to load /api/jobs. Start the dashboard with <code>py jobs.py serve</code>.</p>
       </div>
     `;
     console.error(err);
@@ -947,9 +953,8 @@ document.getElementById('clearFilters').addEventListener('click', () => {
   activeSources.clear();
   Object.keys(sourceCounts).forEach(s => activeSources.add(s));
   updateSourceChips();
-  activeFetches.clear();
-  const fetches = [...new Set(allJobs.map(j => j._dir))].sort();
-  if (fetches.length) activeFetches.add(fetches[fetches.length - 1]);
+  activeStatuses.clear();
+  activeStatuses.add('Online');
   updateFetchChips();
   render();
 });

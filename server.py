@@ -1,0 +1,74 @@
+"""Dashboard HTTP server.
+
+Serves the static dashboard (index.html) and a live JSON view of the DB at
+/api/jobs and the stored PDFs under /pdfs/. No data file is written to disk; the
+DB is queried per request so the dashboard always reflects the current state.
+"""
+
+import http.server
+import json
+
+import store
+
+PORT = 8080
+
+
+def jobs_payload(conn):
+    """All ads as plain dicts with effective (override-merged) field values."""
+    out = []
+    for row in store.all_jobs(conn):
+        item = {
+            'hash': row['hash'],
+            'status': row['status'],
+            'first_seen': row['first_seen'],
+            'last_seen': row['last_seen'],
+            'original_pdf_name': row['original_pdf_name'],
+            'pdf_filename': row['pdf_filename'],
+            'pdf': f'pdfs/{row["pdf_filename"]}' if row['pdf_filename'] else '',
+            'needs_review': bool(row['needs_review']),
+            'notes': row['notes'] or '',
+            'template': row['template'],
+        }
+        for field in ['job_id', 'department', 'working_group', 'position_title',
+                      'position_start_date', 'application_deadline',
+                      'duration_of_contract', 'pay', 'workload', 'contact_name']:
+            item[field] = store.effective(row, field)
+        item['emails'] = store.effective(row, 'emails')
+        item['phones'] = store.effective(row, 'phones')
+        out.append(item)
+    return out
+
+
+def make_handler(db_path):
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.split('?')[0] == '/api/jobs':
+                conn = store.connect(db_path)
+                try:
+                    body = json.dumps(jobs_payload(conn), ensure_ascii=False).encode('utf-8')
+                finally:
+                    conn.close()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            super().do_GET()
+
+        def log_message(self, *args):
+            pass  # quiet
+
+    return Handler
+
+
+def serve(db_path=store.DB_PATH, port=PORT):
+    handler = make_handler(db_path)
+    httpd = http.server.ThreadingHTTPServer(('', port), handler)
+    print(f'Dashboard at http://localhost:{port}  (Ctrl+C to stop)')
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print('\nStopped.')
+    finally:
+        httpd.server_close()

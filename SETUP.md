@@ -1,15 +1,15 @@
-> Author: 
-**Ugur Taysi**  
-Assistant Staff Council Member  
+> Author:
+**Ugur Taysi**
+Assistant Staff Council Member
 taysiug@students.uni-marburg.de
 
 # Windows Setup
 
 ## 1. Install Python
 
-Install Python 3 from [python.org](https://www.python.org/downloads/windows/) (or the
-Microsoft Store). During the installer, tick **"Add python.exe to PATH"**. This also installs
-the `py` launcher.
+Install Python 3 (3.10 or newer) from [python.org](https://www.python.org/downloads/windows/)
+(or the Microsoft Store). During the installer, tick **"Add python.exe to PATH"**. This also
+installs the `py` launcher.
 
 Verify:
 
@@ -19,54 +19,81 @@ py --version
 
 ## 2. Install dependencies
 
-From the project folder:
+The `wheels/` folder contains all dependencies for an offline install. From the project folder:
+
+```powershell
+py -m pip install --no-index --find-links wheels -r requirements.txt
+```
+
+If the machine is online you can instead just run:
 
 ```powershell
 py -m pip install -r requirements.txt
 ```
 
-## 3. Usage
+## 3. How it works
 
-All features live in `jobs.py`:
+All job ads live in a single deduplicated repository:
+
+- `jobs.db` - the SQLite database (the single source of truth).
+- `pdfs/` - every job-ad PDF, stored once, named
+  `<first-seen-date>_<original-name>_<count>.pdf`.
+
+Each ad is identified by the content hash of its PDF, so re-running a fetch never creates
+duplicates. Ads still found online stay `Online`; ads that disappear from the website are flipped
+to `Offline` (nothing is deleted).
+
+## 4. Usage
+
+Run with no arguments for an interactive menu:
 
 ```powershell
-# Scrape every page, download the PDFs, and search them for a name
-py jobs.py fetch --name Matthias
-
-# Same, plus a phone push notification on a match
-py jobs.py fetch --name Matthias --notify YOUR_TOPIC
-
-# List everything fetched so far (filter / open individual PDFs)
-py jobs.py view
-py jobs.py view --latest --source Psychology
-py jobs.py view --search Chemistry
-py jobs.py view --open 3            # opens PDF #3 in your default viewer
-
-# Rebuild jobs_data.json for the dashboard
-py jobs.py generate-data
-
-# Build data and serve the dashboard at http://localhost:8080
-py jobs.py serve
+py jobs.py
 ```
 
-## 4. Notifications (ntfy)
+Or use a subcommand directly (handy for scheduling):
 
-Pick any topic name and pass it with `--notify`. Install the
-[ntfy app](https://ntfy.sh) on your phone and subscribe to the same topic to receive a push
-whenever your name is found in a listing.
+```powershell
+py jobs.py fetch          # scrape pages, download new ads, update statuses
+py jobs.py export-excel   # write job_ads.xlsx from the database
+py jobs.py import-excel   # fold edited job_ads.xlsx corrections back into the database
+py jobs.py serve          # serve the dashboard at http://localhost:8080
+```
 
-## 5. Scheduling with Task Scheduler
+## 5. The Excel workflow
 
-To check for new listings automatically, create a scheduled task. Run this in an
-**Administrator** PowerShell (adjust the path to where you cloned the project and your topic):
+`export-excel` writes `job_ads.xlsx` with one row per ad and a column per field. Ads where the
+parser could not fill every field are flagged in the **Needs Review** column (and highlighted).
+
+To correct an ad:
+
+1. Filter the sheet by **Needs Review = yes**.
+2. Open the linked PDF (the **PDF** column) and read the missing values.
+3. Fix the cells, optionally add a note in **Notes**, and set **Needs Review** to `no`.
+4. Run `py jobs.py import-excel` to save your corrections back into the database.
+
+Your corrections are stored separately from the parsed values, so future fetches never overwrite
+them. Keep `job_ads.xlsx` and the `pdfs/` folder together so the PDF links keep working.
+
+> Note: `export-excel` refuses to overwrite an existing `job_ads.xlsx` unless you confirm (in the
+> menu) or pass `--overwrite`. Always run `import-excel` before re-exporting so you do not lose
+> un-imported edits.
+
+## 6. The dashboard
+
+`py jobs.py serve` starts a local web dashboard at http://localhost:8080 that reads the database
+live. It only works while the server is running. Filter by department and status (Online / Offline
+/ Needs Review), search across all fields, and click an ad to open its PDF.
+
+## 7. Scheduling with Task Scheduler
+
+To check for new listings automatically, create a scheduled task. Run this in an **Administrator**
+PowerShell (adjust the path to where you cloned the project):
 
 ```powershell
 schtasks /create /tn "UniJobFetch" /sc minute /mo 15 ^
-  /tr "py C:\path\to\uni-job-fetch\jobs.py fetch --notify YOUR_TOPIC --keep-hourly"
+  /tr "py C:\path\to\uni-job-fetch\jobs.py fetch"
 ```
-
-`--keep-hourly` keeps the top-of-hour fetch folder and cleans up the in-between runs, so you
-get notified every 15 minutes without accumulating dozens of folders per hour.
 
 Manage the task:
 
@@ -76,6 +103,5 @@ schtasks /query  /tn "UniJobFetch"     # show status
 schtasks /delete /tn "UniJobFetch" /f  # remove it
 ```
 
-Each fetch is saved as a timestamped folder inside a `jobs/` directory next to `jobs.py`, and
-`jobs_data.json` is written alongside `jobs.py`. These paths are relative to the script, so the
-task's working directory doesn't matter as long as the full path to `jobs.py` is in the command.
+The database and `pdfs/` folder live next to `jobs.py`, and all paths are relative to the script,
+so the task's working directory does not matter as long as the full path to `jobs.py` is correct.

@@ -2,3 +2,9 @@ jobs/
 jobs_data.json
 wheels/
 docs/personal/
+backup/
+pdfs/
+jobs.db
+job_ads.xlsx
+__pycache__/
+*.pyc
