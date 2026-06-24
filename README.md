@@ -1,90 +1,106 @@
-# Uni Job Fetch
+<p align="center">
+  <img src="docs/images/banner.png" alt="uni-job-fetch: university job-ad pipeline" width="100%">
+</p>
 
-A small tool that collects student assistant (SHK) job ads from the University of Marburg
-website, keeps them all in one place, and lets you browse, search, and export them. It checks
-the website for you, downloads any new ads as PDFs, and remembers everything it has seen so you
-never have to go through the pages by hand.
+<h1 align="center">uni-job-fetch</h1>
 
-You mainly do three things with it: **fetch** new ads, look at them in a **dashboard** or in
-**Excel**, and (optionally) tidy up any details the tool could not read automatically.
+<p align="center">
+  <em>Scrape university student-assistant job ads, extract every field, and turn a noisy job board into a reviewable Excel sheet and a live dashboard.</em>
+</p>
 
-## Setting it up
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white">
+  <img alt="Interface" src="https://img.shields.io/badge/interface-CLI-7c8cff">
+  <img alt="Output" src="https://img.shields.io/badge/output-Excel%20%2B%20Dashboard-34d399">
+  <img alt="Status" src="https://img.shields.io/badge/status-active-6aa8ff">
+</p>
 
-You only need to do this once.
+---
 
-### 1. Install Python
+## What it does
 
-Install Python 3 (version 3.10 or newer) from
-[python.org](https://www.python.org/downloads/windows/). In the installer, **tick the box
-"Add python.exe to PATH"** before clicking install.
+University job boards publish openings as a sprawl of PDF flyers with different layouts, departments, and formats. **uni-job-fetch** turns that mess into clean, structured, trackable data:
 
-To check it worked, open **PowerShell** and type:
+- 🔎 **Fetch**: pulls new job-ad PDFs from the source and detects what's online, offline, or newly added.
+- 🧩 **Parse**: extracts structured fields from each ad: department, position, working group, deadlines, pay, workload, contacts, and more.
+- ✅ **Review**: round-trips through Excel so a human can correct anything the parser flagged as uncertain.
+- 📊 **Visualize**: serves a dark, filterable dashboard with per-department breakdowns and a deadline timeline.
 
-```powershell
-py --version
+Everything runs from one interactive command-line menu.
+
+---
+
+## The CLI
+
+A single entry point opens an interactive menu backed by a local job repository. It tracks how many ads are online, offline, and still **need review**.
+
+<p align="center">
+  <img src="docs/images/cli.png" alt="Interactive CLI menu" width="520">
+</p>
+
+| Action | What it does |
+| --- | --- |
+| **Fetch new ads** | Scrapes the source, downloads new PDFs, and updates each ad's online/offline status. |
+| **Export to Excel** | Writes the full repository to a spreadsheet for human review. |
+| **Import Excel corrections** | Reads your edits back in and clears the *needs-review* flags. |
+| **Serve dashboard** | Boots the web dashboard locally. |
+| **Quit** | Exits. |
+
+---
+
+## Excel export &amp; corrections
+
+Every ad is flattened into one row with all extracted fields. Rows the parser isn't sure about are marked **Needs Review** so you can fix pay, contacts, or deadlines by hand, then import the file back.
+
+<p align="center">
+  <img src="docs/images/excel.png" alt="Excel export of parsed job ads" width="100%">
+</p>
+
+Captured columns include:
+
+> `Status` · `First Seen` · `Last Seen` · `Department` · `Job-ID` · `Position Title` · `Working Group` · `Position Start Date` · `Application Deadline` · `Duration of Contract` · `Pay` · `Workload` · `Contact Name` · `Emails` · `Phones` · `Needs Review` · `Notes` · `Original PDF Name` · `PDF link` 
+
+---
+
+## Dashboard
+
+Run **Serve dashboard** to explore the repository in the browser: totals at a glance, a **Jobs by Department** donut, a **Deadlines Timeline**, and a filterable job list with live countdowns to each application deadline.
+
+<p align="center">
+  <img src="docs/images/dashboard.png" alt="Uni Jobs dashboard" width="100%">
+</p>
+
+- **Filters**: by department, status (Online / Offline / Needs Review), and a custom deadline range.
+- **Jobs by Department**: color-coded donut showing where the openings are concentrated.
+- **Deadlines Timeline**: how many applications close on each date.
+- **Job Listings**: each row shows the position, department, Job-ID, deadline, and how many days are left (with a ⚠ review badge where applicable).
+
+---
+
+## Quick start
+
+```bash
+# 1. Clone
+git clone https://github.com/utaysi/uni-job-fetch.git
+cd uni-job-fetch
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Launch the interactive CLI
+python src/jobs.py
 ```
 
-You should see a version number.
+Then pick **Fetch new ads** to populate the repository, **Export to Excel** to review, and **Serve dashboard** to visualize.
 
-### 2. Copy the project onto your PC
-
-Copy the whole project folder (the one containing the `src` folder) somewhere on your computer, for
-example your Desktop. Everything the tool needs is already inside it.
-
-### 3. Install the tool's dependencies
-
-Open PowerShell, go into the project folder, and run:
-
-```powershell
-py -m pip install --no-index --find-links data/wheels -r requirements.txt
-```
-
-This installs everything from the included `data/wheels` folder, so it works without an internet
-connection.
-
-## Using it
-
-The easiest way is to just run the tool and pick from the menu:
-
-```powershell
-py src/jobs.py
-```
-
-You can also run a single action directly:
-
-```powershell
-py src/jobs.py fetch          # check the website and download any new job ads
-py src/jobs.py serve          # open the dashboard in your web browser
-py src/jobs.py export-excel   # save all the ads into job_ads.xlsx
-py src/jobs.py import-excel   # save your edits from job_ads.xlsx back into the tool
-```
-
-### The dashboard
-
-`py src/jobs.py serve` opens a web page at http://localhost:8080 where you can browse every job ad,
-filter by department and status, search across all the text, and click an ad to open its PDF.
-The page only works while the command is running, so leave that PowerShell window open while you
-use it.
-
-### Fixing details in Excel
-
-`py src/jobs.py export-excel` creates a file called `job_ads.xlsx` with one row per job ad. If the
-tool could not read some details from an ad, that row is flagged in the **Needs Review** column.
-
-To fix one:
-
-1. Find the rows marked **Needs Review = yes**.
-2. Open the PDF (the link is in the **PDF** column) and read the missing details.
-3. Fill in the empty cells, add anything useful in **Notes**, then change **Needs Review** to `no`.
-4. Run `py src/jobs.py import-excel` to save your changes back into the tool.
-
-Your edits are kept safe and are never overwritten the next time you fetch. Always run
-`import-excel` before exporting again so you do not lose any changes.
+---
 
 ## More detail
 
 Want to know how it works under the hood, run it fully offline, or have it check for new ads
 automatically? See [docs/TECHNICAL.md](docs/TECHNICAL.md).
+
+---
 
 ## Questions?
 
