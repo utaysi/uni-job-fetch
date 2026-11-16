@@ -50,6 +50,8 @@ If the machine is online you can instead just run:
 py -m pip install -r requirements.txt
 ```
 
+`requirements.txt` pins exact versions that match the offline wheels. The hosted workflow installs from `requirements.lock` instead, which also pins every indirect dependency and checks each download against a stored hash. After changing a version in `requirements.txt`, regenerate the lock file with `uv pip compile requirements.txt --universal --generate-hashes -o requirements.lock`.
+
 ## Export safety
 
 `export-excel` refuses to overwrite an existing `job_ads.xlsx` unless you confirm (in the menu)
@@ -109,6 +111,7 @@ Clicking an ad on the hosted dashboard opens its notes and tags. The PDF button 
 - **No script injection.** Everything from the ads or from users is escaped before it is shown, and a strict Content Security Policy only allows the dashboard's own scripts. The page loads nothing from other websites.
 - **Narrow fetcher.** The scraper only downloads `https` links on `uni-marburg.de`, checks every redirect before following it, caps every download (5 MB per page, 25 MB per PDF), and runs on a temporary GitHub machine.
 - **Small secrets.** The Fetch now button uses a GitHub token that can only start and view workflow runs in the data repo. It cannot read or change code or data.
+- **Secrets only where needed.** In the daily workflow, the Cloudflare token is passed only to the three `wrangler` steps, not to the steps that install packages or read downloaded PDFs. Python packages are installed from `requirements.lock` with pinned hashes, so a newly published (possibly malicious) package version never runs next to the secrets.
 
 ### One-time setup
 

@@ -3,6 +3,9 @@
 # Copy into the PRIVATE data repo as .github/workflows/update.yml.
 # Runs once a day, and when a council member presses "Fetch now" (max 3 per day).
 # Secrets needed in the data repo: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID.
+# They are passed only to the three wrangler steps, never to the steps that install packages or
+# read downloaded PDFs. Code running anywhere in a job could still dig them out of the runner's
+# memory, so Python packages are installed from requirements.lock with pinned hashes.
 
 name: Update board
 run-name: ${{ inputs.source == 'dashboard' && 'Dashboard fetch' || (github.event_name == 'schedule' && 'Scheduled fetch' || 'Manual run') }}
@@ -31,8 +34,6 @@ jobs:
     timeout-minutes: 30
     env:
       TZ: Europe/Berlin
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Check out code (public repo)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,7 +58,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --disable-pip-version-check --quiet -r code/requirements.txt
+          python -m pip install --disable-pip-version-check --quiet --require-hashes -r code/requirements.lock
           npm ci --prefix code/worker --no-fund --no-audit
 
       - name: Fetch new ads
@@ -68,10 +69,16 @@ jobs:
 
       - name: Apply database migrations
         working-directory: code/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler d1 migrations apply DB --remote -c ../data/wrangler.toml
 
       - name: Back up notes and tags
         working-directory: code/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler d1 export DB --remote --output ../data/annotations.sql -c ../data/wrangler.toml
 
       - name: Save data
@@ -89,4 +96,7 @@ jobs:
 
       - name: Deploy
         working-directory: code/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy -c ../data/wrangler.toml

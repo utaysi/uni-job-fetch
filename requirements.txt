@@ -1,4 +1,8 @@
-PyMuPDF>=1.24
-openpyxl>=3.1
-rich>=13.0
-questionary>=2.0
+# Exact versions, matching the offline wheels in data/wheels/.
+# The GitHub workflow installs from requirements.lock instead (all dependencies, with hashes).
+# After changing a version here, regenerate the lock file:
+#   uv pip compile requirements.txt --universal --generate-hashes -o requirements.lock
+PyMuPDF==1.27.2.3
+openpyxl==3.1.5
+rich==15.0.0
+questionary==2.1.1
