@@ -8,6 +8,7 @@ remote PDF basename. Downloads are returned as raw bytes for hashing/storage.
 import html
 import os
 import re
+import urllib.parse
 import urllib.request
 
 MAIN_URL = ('https://www.uni-marburg.de/de/universitaet/administration/verwaltung/'
@@ -32,11 +33,11 @@ SUBPAGES = [
     ('https://www.uni-marburg.de/de/cnms/centrum/stellenangebote', 'Center for Near and Middle Eastern Studies (CNMS)'),
     ('https://www.uni-marburg.de/de/ub/ueber-uns/karriere-und-ausbildung/studentische-hilfskraftstellen', 'University Library'),
     ('https://www.uni-marburg.de/de/hrz/aktuelles/nachrichten/2025/shk-hrz-2025-02', 'University Computing Centre'),
-    ('http://www.uni-marburg.de/grk1782/offenestellen', 'Research Training Group Functionalization of Semiconductors'),
+    ('https://www.uni-marburg.de/grk1782/offenestellen', 'Research Training Group Functionalization of Semiconductors'),
     ('https://www.uni-marburg.de/en/synmikro/jobs-1', 'Center for Synthetic Microbiology'),
     ('https://www.uni-marburg.de/de/fotomarburg/ueberuns/stellenangebote', 'Image archive Photo Marburg'),
     ('https://www.uni-marburg.de/de/genderzukunft/zentrum/stellen', 'Center for Gender Studies and Feminist Futures Research'),
-    ('http://www.uni-marburg.de/botgart/aktuelles/news/', 'Botanical garden'),
+    ('https://www.uni-marburg.de/botgart/aktuelles/news/', 'Botanical garden'),
     ('https://www.uni-marburg.de/de/zfl/stellenausschreibungen', 'Center for Teacher Education'),
     ('https://www.uni-marburg.de/de/konfliktforschung/zentrum/profil/stellenauschreibungen', 'Center for Conflict Research'),
     ('https://www.uni-marburg.de/de/icwc/zentrum/stellenausschreibungen', 'International Centre for the Study of War Crimes Trials (ICWC)'),
@@ -48,22 +49,51 @@ SUBPAGES = [
 PDF_LINK_RE = re.compile(r'href=["\x27]([^"\x27]*\.pdf)["\x27]')
 
 
+# Only ever download from the university's own servers, and never more than
+# these many bytes per response, so a hostile page or file cannot make the
+# fetcher read local files, hit other hosts, or exhaust memory.
+ALLOWED_DOMAIN = 'uni-marburg.de'
+MAX_PAGE_BYTES = 5 * 1024 * 1024
+MAX_PDF_BYTES = 25 * 1024 * 1024
+
+
+def _read_capped(url, timeout, max_bytes):
+    if not is_allowed_url(url):
+        raise ValueError(f'refusing to fetch non-university URL: {url}')
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        if not is_allowed_url(resp.geturl()):
+            raise ValueError(f'redirected to non-university URL: {resp.geturl()}')
+        data = resp.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError(f'response larger than {max_bytes} bytes: {url}')
+    return data
+
+
 def fetch_page(url, log):
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.read().decode('utf-8', errors='replace')
+        return _read_capped(url, 30, MAX_PAGE_BYTES).decode('utf-8', errors='replace')
     except Exception as e:
         log(f'  WARNING: could not fetch {url}: {e}')
         return None
 
 
+def is_allowed_url(url):
+    """True for https URLs on uni-marburg.de or one of its subdomains."""
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or '').lower()
+    return (parts.scheme == 'https'
+            and (host == ALLOWED_DOMAIN or host.endswith('.' + ALLOWED_DOMAIN)))
+
+
 def absolute_url(href):
-    if href.startswith('http'):
-        return href
-    if href.startswith('/'):
-        return 'https://www.uni-marburg.de' + href
-    return href
+    """Resolve an ad link to an https university URL, or None to skip it."""
+    if href.startswith('/') and not href.startswith('//'):
+        href = 'https://www.uni-marburg.de' + href
+    parts = urllib.parse.urlsplit(href)
+    if parts.scheme == 'http':
+        href = urllib.parse.urlunsplit(('https',) + tuple(parts[1:]))
+    return href if is_allowed_url(href) else None
 
 
 def original_name(href):
@@ -107,6 +137,9 @@ def discover_all(log):
     def add(items):
         for it in items:
             url = absolute_url(it['href'])
+            if url is None:
+                log(f"  skipped non-university link: {it['href']}")
+                continue
             if url in seen_urls:
                 continue
             seen_urls.add(url)
@@ -132,6 +165,4 @@ def discover_all(log):
 
 
 def download(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return resp.read()
+    return _read_capped(url, 60, MAX_PDF_BYTES)
