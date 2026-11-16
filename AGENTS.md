@@ -12,7 +12,7 @@ Instructions for coding agents working in this repository.
 
 - For every commit, stage the changes and then call the `commit-message` skill (the `/commit-message` slash command) to write the message. Do not write commit messages by hand.
 - Before any git operation, follow the user's own rules. If they require confirmation before committing or pushing, ask first.
-- Never commit `data/`, `site/`, `job_ads.xlsx`, secrets, tokens, the hosting domain, or Cloudflare Access IDs. This repository is **public**; deployment details live in the private data repo (see `deploy/`).
+- Never commit `data/`, `site/`, `job_ads.xlsx`, secrets, tokens, the hosting domain, Cloudflare Access IDs, or details of the owner's private infrastructure (server names, DNS setup). This also applies to TRACKER.md. This repository is **public**; deployment details live in the private data repo (see `deploy/`).
 
 ## Project map
 

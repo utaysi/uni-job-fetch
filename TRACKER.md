@@ -40,11 +40,22 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 
 ### Scraper
 
+- [ ] The main page (`MAIN_URL` in `src/scrape.py`) now redirects to `/de/universitaet/profil/universitaetskultur/karriere/stellenangebote/stud-und-wiss-hilfskraftstellen`, which contains no PDF links, so the main page yields 0 ads (subpages still work). Find where the central ads moved and update `MAIN_URL` and `discover_main_page`. (Found 2026-11-16 during the security fixes; same result with the old fetch code, so not caused by them.)
 - [ ] Two subpages now redirect to the university login page and are skipped on every fetch: University Computing Centre (`/de/hrz/aktuelles/nachrichten/2025/shk-hrz-2025-02`) and Center for Synthetic Microbiology (`/en/synmikro/jobs-1`). Find their current job pages and update `SUBPAGES` in `src/scrape.py`, or remove them. (Found 2026-11-16; this was already failing before the hardening.)
+
+### Security hardening (from the 2026-11-16 audit, none blocking)
+
+- [x] Scope `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in `deploy/update.yml` (and the data repo copy) to the three `wrangler` steps only, instead of job-level `env`, so `pip install`, `npm ci` install scripts and the PDF scraper never see them. Pinned `requirements.txt` to the tested versions and added `requirements.lock` (all dependencies, with hashes) for the workflow.
+- [x] Add `.dev.vars*`, `.env*` and `wrangler.toml` to the code repo `.gitignore`, so local Worker secrets or a copied deploy config cannot be committed by accident.
+- [x] Decide on the commit author email: the owner keeps the personal Gmail address visible, no rewrite of authors. (2026-11-16)
+- [x] Trim private infrastructure details from this tracker (private server name, DNS setup) and add a rule against them to AGENTS.md.
+- [x] In `src/scrape.py`, reject off-domain redirects before following them.
+- [ ] Optional, bigger: run the fetch and build in a separate job without secrets and deploy from a second job, so not even a hostile PDF exploiting PyMuPDF could read the Cloudflare token from runner memory. Needs care: the deploy job must not trust code or config produced by the fetch job.
 
 ### Recurring
 
 - [ ] Renew the fine-grained GitHub token before it expires (1 year after creation) and run `wrangler secret put GITHUB_TOKEN` again.
+- [ ] Every few months, update the pinned Python packages (PyMuPDF especially, since it parses downloaded PDFs): bump `requirements.txt`, regenerate `requirements.lock` (command in `docs/TECHNICAL.md`), and refresh `data/wheels/`.
 
 ## Done
 
@@ -57,6 +68,18 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Deployment templates in `deploy/` and hosting docs in `docs/TECHNICAL.md`. (2026-11-16)
 
 ## Session log
+
+### 2026-11-16 (security audit before pushing the code repo)
+
+- Audited the public code repo (working tree and full history, all 21 commits) and the private data repo before the owner pushes `master`. Findings are listed under "Security hardening".
+- Verified: no hosting domain, D1 database ID, account ID, Access IDs, tokens, keys or private data in any public commit; only placeholders and `example.org` values. `data/`, `site/`, `job_ads.xlsx`, `docs/personal/`, `.wrangler/` are ignored and were never committed. Data repo is private, code repo public (checked with `gh`). Screenshots in `docs/images/` show only public job ad data and carry no metadata. `jobs_data.json` in old history holds only public ad titles and links.
+- Verified code: Worker fails closed (403 without an RS256 Access JWT matching issuer and AUD), Origin check on every write, parameterized SQL, note ownership enforced server-side, `no-store` caching, CSP on HTML. Dashboard escapes all data and loads nothing third-party. Vendored Chart.js is byte-identical to npm `chart.js@4.4.7`. Lockfile resolves only from registry.npmjs.org. Pinned action SHAs match their release tags. Worker tests pass (22), `py_compile` passes.
+- Already public before this session and unchanged: author name, role and student email in the README; the personal Gmail address as commit author email (owner decided to keep it).
+- Fixed afterwards, with the owner's go-ahead: redirect targets are checked before following (`src/scrape.py`); Cloudflare secrets only on the three `wrangler` steps; `requirements.txt` pinned to the tested versions and `requirements.lock` with hashes used by the workflow (same change copied into the data repo workflow and committed there); `.gitignore` covers `.env*`, `.dev.vars*`, `wrangler.toml`; private infrastructure details removed from this tracker and a rule added to AGENTS.md.
+- History cleanup: the not yet pushed commits were rewritten with `git filter-repo` so the old tracker text (private server name, DNS setup) no longer appears in any commit. Commits already on GitHub and author emails were left untouched, so a normal push still works. A backup bundle of the repo from before the rewrite sits next to the repo folder.
+- Verified: redirect guard refuses off-domain, look-alike and plain `http` targets and follows university ones; live fetch of a subpage still works; the hash-locked install works on Python 3.12 and every wheel in `data/wheels/` matches a hash in the lock; workflow YAML parses with secrets only on the three steps; Worker tests pass (22); `py_compile` passes.
+- Not verified: the changed workflow on a real GitHub runner (first run is setup step 6).
+- Found while testing: the main page moved and now yields 0 ads (see Scraper). Not caused by these changes.
 
 ### 2026-11-16 (hosting setup, part 1)
 
