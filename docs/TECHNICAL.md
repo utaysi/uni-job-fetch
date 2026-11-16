@@ -107,7 +107,7 @@ Clicking an ad on the hosted dashboard opens its notes and tags. The PDF button 
 - **No other addresses.** The `*.workers.dev` address and preview URLs are disabled.
 - **Safe writes.** Changes must come from the dashboard itself (Origin check) as JSON, and all database queries use bound parameters. Notes are limited to 2,000 characters and tags to 30. Each person can make up to 300 changes a day.
 - **No script injection.** Everything from the ads or from users is escaped before it is shown, and a strict Content Security Policy only allows the dashboard's own scripts. The page loads nothing from other websites.
-- **Narrow fetcher.** The scraper only downloads `https` links on `uni-marburg.de`, caps every download (5 MB per page, 25 MB per PDF), and runs on a temporary GitHub machine.
+- **Narrow fetcher.** The scraper only downloads `https` links on `uni-marburg.de`, checks every redirect before following it, caps every download (5 MB per page, 25 MB per PDF), and runs on a temporary GitHub machine.
 - **Small secrets.** The Fetch now button uses a GitHub token that can only start and view workflow runs in the data repo. It cannot read or change code or data.
 
 ### One-time setup

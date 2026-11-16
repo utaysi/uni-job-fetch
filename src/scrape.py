@@ -57,11 +57,24 @@ MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_PDF_BYTES = 25 * 1024 * 1024
 
 
+class _UniversityOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """Checks a redirect target before following it, so no request ever leaves the university."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not is_allowed_url(newurl):
+            fp.close()
+            raise ValueError(f'redirected to non-university URL: {newurl}')
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_UniversityOnlyRedirects)
+
+
 def _read_capped(url, timeout, max_bytes):
     if not is_allowed_url(url):
         raise ValueError(f'refusing to fetch non-university URL: {url}')
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _opener.open(req, timeout=timeout) as resp:
         if not is_allowed_url(resp.geturl()):
             raise ValueError(f'redirected to non-university URL: {resp.geturl()}')
         data = resp.read(max_bytes + 1)
