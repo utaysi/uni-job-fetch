@@ -1,9 +1,13 @@
 """Dashboard HTTP server.
 
-Serves the static dashboard (web/index.html) and a live JSON view of the DB at
-/api/jobs and the stored PDFs under /pdfs/ (on disk in data/pdfs/). No data file
-is written to disk; the DB is queried per request so the dashboard always
-reflects the current state.
+Serves the static dashboard (web/) and a live JSON view of the DB at
+/api/jobs.json (also /api/jobs) and the stored PDFs under /pdfs/ (on disk in
+data/pdfs/). No data file is written to disk; the DB is queried per request so
+the dashboard always reflects the current state.
+
+This local server is read-only. Notes, tags and the fetch button only exist on
+the hosted dashboard (see worker/ and docs/TECHNICAL.md); the page hides them
+when it runs here.
 """
 
 import http.server
@@ -30,7 +34,6 @@ def jobs_payload(conn):
             'pdf_filename': row['pdf_filename'],
             'pdf': f'pdfs/{row["pdf_filename"]}' if row['pdf_filename'] else '',
             'needs_review': bool(row['needs_review']),
-            'notes': row['notes'] or '',
             'template': row['template'],
         }
         for field in ['job_id', 'department', 'working_group', 'position_title',
@@ -45,18 +48,26 @@ def jobs_payload(conn):
 
 def make_handler(db_path):
     class Handler(http.server.SimpleHTTPRequestHandler):
+        def _send_json(self, data):
+            body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
-            if self.path.split('?')[0] == '/api/jobs':
+            path = self.path.split('?')[0]
+            if path in ('/api/jobs', '/api/jobs.json'):
                 conn = store.connect(db_path)
                 try:
-                    body = json.dumps(jobs_payload(conn), ensure_ascii=False).encode('utf-8')
+                    self._send_json(jobs_payload(conn))
                 finally:
                     conn.close()
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                return
+            if path == '/api/me':
+                # No login locally: the page sees no user and stays read-only.
+                self._send_json({'email': None})
                 return
             super().do_GET()
 
@@ -81,7 +92,7 @@ def make_handler(db_path):
 
 def serve(db_path=store.DB_PATH, port=PORT):
     handler = make_handler(db_path)
-    httpd = http.server.ThreadingHTTPServer(('', port), handler)
+    httpd = http.server.ThreadingHTTPServer(('127.0.0.1', port), handler)
     print(f'Dashboard at http://localhost:{port}  (Ctrl+C to stop)')
     try:
         httpd.serve_forever()
