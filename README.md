@@ -58,7 +58,7 @@ Every ad is flattened into one row with all extracted fields. Rows the parser is
 
 Captured columns include:
 
-> `Status` · `First Seen` · `Last Seen` · `Department` · `Job-ID` · `Position Title` · `Working Group` · `Position Start Date` · `Application Deadline` · `Duration of Contract` · `Pay` · `Workload` · `Contact Name` · `Emails` · `Phones` · `Needs Review` · `Notes` · `Original PDF Name` · `PDF link` 
+> `Status` · `First Seen` · `Last Seen` · `Department` · `Job-ID` · `Position Title` · `Working Group` · `Position Start Date` · `Application Deadline` · `Duration of Contract` · `Pay` · `Workload` · `Contact Name` · `Emails` · `Phones` · `Needs Review` · `Original PDF Name` · `PDF link` 
 
 ---
 
@@ -74,6 +74,8 @@ Run **Serve dashboard** to explore the repository in the browser: totals at a gl
 - **Jobs by Department**: color-coded donut showing where the openings are concentrated.
 - **Deadlines Timeline**: how many applications close on each date.
 - **Job Listings**: each row shows the position, department, Job-ID, deadline, and how many days are left (with a ⚠ review badge where applicable).
+
+The dashboard can also be hosted online behind a login, for example for a staff council. The hosted version adds shared notes and tags on each ad, a "Last fetched" time, a daily automatic fetch, and a limited "Fetch now" button. See [Hosting](docs/TECHNICAL.md#hosting-the-dashboard-online).
 
 ---
 

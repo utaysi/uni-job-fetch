@@ -1,0 +1,38 @@
+# Deployment config for the hosted dashboard.
+#
+# Copy this file into the PRIVATE data repo as `wrangler.toml` and fill in the <...> values.
+# The data repo is checked out at uni-job-fetch/data/, so paths below are relative to that.
+# Keep this file out of the public code repo: it names your domain and Access IDs.
+
+name = "uni-job-board"
+main = "../worker/src/index.js"
+compatibility_date = "2026-10-01"
+
+# Reachable only through the custom domain below: no *.workers.dev address, no preview URLs.
+workers_dev = false
+preview_urls = false
+
+routes = [
+  { pattern = "board.<your-domain>", custom_domain = true },
+]
+
+[assets]
+directory = "../site"
+binding = "ASSETS"
+# Send every request through the Worker first, so the login check covers the page, data and PDFs.
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "uni-job-board"
+database_id = "<id printed by: npx wrangler d1 create uni-job-board>"
+migrations_dir = "../worker/migrations"
+
+[vars]
+# Leave POLICY_AUD empty until Cloudflare Access is set up: the Worker refuses every request until then.
+TEAM_DOMAIN = "<your-team>.cloudflareaccess.com"
+POLICY_AUD = ""
+GITHUB_REPO = "<owner>/<data-repo>"
+GITHUB_WORKFLOW = "update.yml"
+GITHUB_REF = "main"
+FETCH_LIMIT = "3"

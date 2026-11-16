@@ -1,0 +1,4 @@
+# Copy into the private data repo as .gitignore
+backup/
+wheels/
+.wrangler/
