@@ -1,8 +1,9 @@
 """Excel export/import for the job-ad repository.
 
 The DB is authoritative; Excel is a round-trip view. `export_excel` writes one row
-per ad; `import_excel` folds edited fields, Notes, and Needs Review back into the
-DB as overrides (matched by the hidden Hash column).
+per ad; `import_excel` folds edited fields and Needs Review back into the DB as
+overrides (matched by the hidden Hash column). Notes are not part of the Excel
+round-trip; they live in the hosted dashboard.
 
 Date columns emit a real date-typed cell when the value parses as a date, so Excel
 sorts them chronologically; unparseable values ("ab sofort") stay as text and
@@ -27,7 +28,6 @@ LIST_SEP = '\n'
 #   list      - overridable JSON-array field (emails/phones)
 #   date      - overridable date-or-text field
 #   review    - the needs_review flag
-#   notes     - the notes field
 #   pdf       - hyperlink to the PDF file
 COLUMNS = [
     ('Hash', 'hash', 'meta'),
@@ -47,7 +47,6 @@ COLUMNS = [
     ('Emails', 'emails', 'list'),
     ('Phones', 'phones', 'list'),
     ('Needs Review', 'needs_review', 'review'),
-    ('Notes', 'notes', 'notes'),
     ('Original PDF Name', 'original_pdf_name', 'meta'),
     ('PDF', 'pdf', 'pdf'),
 ]
@@ -105,8 +104,6 @@ def export_excel(conn, path=EXCEL_FILE, overwrite=False):
                     cell.number_format = 'YYYY-MM-DD'
             elif kind == 'review':
                 cell.value = 'yes' if needs_review else 'no'
-            elif kind == 'notes':
-                cell.value = row['notes'] or ''
             elif kind == 'pdf':
                 fname = row['pdf_filename']
                 if fname:
@@ -124,7 +121,7 @@ def export_excel(conn, path=EXCEL_FILE, overwrite=False):
     for c, (header, _key, kind) in enumerate(COLUMNS, 1):
         letter = get_column_letter(c)
         width = max(len(header) + 2, 14)
-        if kind in ('text', 'list', 'notes'):
+        if kind in ('text', 'list'):
             width = 28
         if kind == 'meta' and header == 'Hash':
             width = 12
@@ -167,10 +164,9 @@ def import_excel(conn, path=EXCEL_FILE):
                 raw = _cell_to_text(row[index[header]])
                 items = [p.strip() for p in raw.replace(';', '\n').splitlines() if p.strip()]
                 new_values[key] = items
-        notes = _cell_to_text(row[index['Notes']]) if 'Notes' in index else None
         review_val = _cell_to_text(row[index['Needs Review']]).lower() if 'Needs Review' in index else ''
         needs_review = review_val in ('yes', 'true', '1', 'y') if review_val else None
-        if store.apply_overrides(conn, hash_, new_values, notes=notes, needs_review=needs_review):
+        if store.apply_overrides(conn, hash_, new_values, needs_review=needs_review):
             updated += 1
     conn.commit()
     return updated
