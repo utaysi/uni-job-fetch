@@ -14,3 +14,8 @@ __pycache__/
 /site/
 node_modules/
 .wrangler/
+
+# Local secrets and deploy config (the real wrangler.toml lives in the private data repo)
+.env*
+.dev.vars*
+wrangler.toml
