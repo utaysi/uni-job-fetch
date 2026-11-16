@@ -8,3 +8,9 @@ jobs.db
 job_ads.xlsx
 __pycache__/
 *.pyc
+
+# Hosted dashboard: private data repo checkout, build output, Worker tooling
+/data/
+/site/
+node_modules/
+.wrangler/
