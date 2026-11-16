@@ -10,13 +10,16 @@ Run with no arguments for an interactive menu, or use a subcommand directly:
     export-excel   write job_ads.xlsx from the database
     import-excel   fold edited job_ads.xlsx corrections back into the database
     serve          serve the dashboard at http://localhost:8080
+    build-site     write the static dashboard (page, data, PDFs) for hosting
 """
 
 import argparse
 import hashlib
+import json
 import logging
 import os
 import re
+import shutil
 import sys
 
 import exporter
@@ -146,6 +149,51 @@ def cmd_serve(args):
     return 0
 
 
+WEB_DIR = 'web'
+SITE_FILES = ['index.html', 'app.js']
+SITE_DIRS = ['vendor']
+
+
+def cmd_build_site(args):
+    """Write the hosted dashboard as plain files: page, scripts, data, PDFs."""
+    out = os.path.abspath(args.out)
+    root = os.getcwd()
+    if root == out or root.startswith(out + os.sep):
+        print(f'Refusing to build into {out}: it contains the project.')
+        return 1
+    if os.path.exists(out):
+        # Only ever replace a directory this command created before.
+        if not os.path.isfile(os.path.join(out, 'api', 'jobs.json')):
+            print(f'Refusing to replace {out}: it is not a previous build-site output.')
+            return 1
+        shutil.rmtree(out)
+
+    os.makedirs(os.path.join(out, 'api'))
+    for name in SITE_FILES:
+        shutil.copy2(os.path.join(WEB_DIR, name), os.path.join(out, name))
+    for name in SITE_DIRS:
+        shutil.copytree(os.path.join(WEB_DIR, name), os.path.join(out, name))
+
+    conn = store.connect()
+    try:
+        jobs = server.jobs_payload(conn)
+    finally:
+        conn.close()
+    with open(os.path.join(out, 'api', 'jobs.json'), 'w', encoding='utf-8') as f:
+        json.dump(jobs, f, ensure_ascii=False)
+
+    pdf_out = os.path.join(out, 'pdfs')
+    os.makedirs(pdf_out)
+    copied = 0
+    for job in jobs:
+        name = job['pdf_filename']
+        if name and name == os.path.basename(name) and os.path.isfile(os.path.join(PDF_DIR, name)):
+            shutil.copy2(os.path.join(PDF_DIR, name), os.path.join(pdf_out, name))
+            copied += 1
+    print(f'Built site in {out}: {len(jobs)} ad(s), {copied} PDF(s).')
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog='jobs.py', description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -164,6 +212,11 @@ def build_parser():
 
     p_serve = sub.add_parser('serve', help='Serve the dashboard on http://localhost:8080')
     p_serve.set_defaults(func=cmd_serve)
+
+    p_site = sub.add_parser('build-site', help='Write the static dashboard for hosting')
+    p_site.add_argument('--out', default='site',
+                        help='Output directory, relative to the project root (default: site)')
+    p_site.set_defaults(func=cmd_build_site)
 
     return parser
 
