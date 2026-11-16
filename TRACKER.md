@@ -6,7 +6,7 @@ Status markers: `[ ]` to do, `[~]` in progress, `[x]` done. Put the newest sessi
 
 ## In progress
 
-- (nothing)
+- Hosted dashboard one-time setup: steps 1 to 4 done, step 5 half done (see below).
 
 ## To do
 
@@ -14,12 +14,12 @@ Status markers: `[ ]` to do, `[~]` in progress, `[x]` done. Put the newest sessi
 
 Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-setup).
 
-- [ ] 1. Confirm the domain's nameservers point to Cloudflare.
-- [ ] 2. `cd worker && npm ci && npx wrangler login`.
-- [ ] 3. Create the D1 database (`npx wrangler d1 create uni-job-board`) and note its ID.
-- [ ] 4. Create the private data repo from `data/` with the files from `deploy/`, and push it.
-- [ ] 5. Create the Cloudflare API token and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as data repo secrets.
-- [ ] 6. Run the workflow once manually. Confirm GitHub runners can reach uni-marburg.de and the board answers "Forbidden".
+- [x] 1. Confirm the domain's nameservers point to Cloudflare.
+- [x] 2. `cd worker && npm ci && npx wrangler login`.
+- [x] 3. Create the D1 database (`npx wrangler d1 create uni-job-board`) and note its ID. Created with `--jurisdiction eu` so notes and tags stay in the EU.
+- [x] 4. Create the private data repo from `data/` with the files from `deploy/`, and push it. `wrangler.toml` filled in (domain, database ID, `GITHUB_REPO`); `TEAM_DOMAIN` and `POLICY_AUD` wait for step 7.
+- [~] 5. Create the Cloudflare API token and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as data repo secrets. `CLOUDFLARE_ACCOUNT_ID` is set. Still to do: create the token (Edit Cloudflare Workers template plus Account > D1 > Edit) and add it as `CLOUDFLARE_API_TOKEN` in the GitHub web UI.
+- [ ] 6. Before running: push this code repo (`master` is ahead of `origin/master`; the workflow checks out the code from GitHub). The owner wants to be asked right before the push. Then run the workflow once manually. Confirm GitHub runners can reach uni-marburg.de and the board answers "Forbidden".
 - [ ] 7. Enable Cloudflare Access on the Worker (one-time PIN, email allowlist), then set `TEAM_DOMAIN` and `POLICY_AUD` and redeploy.
 - [ ] 8. Create the fine-grained GitHub token (data repo only, Actions read and write) and `wrangler secret put GITHUB_TOKEN`.
 - [ ] 9. Import the 3 existing notes from `jobs.db` into D1.
@@ -33,6 +33,10 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [ ] Fetch now counts down 3, 2, 1, 0, refuses a fourth, and stays disabled while a run is in progress.
 - [ ] Browser devtools show no requests to third-party hosts.
 - [ ] Check the Cloudflare menu names in the setup docs against the real dashboard and correct them if needed.
+
+### Docs
+
+- [ ] `docs/TECHNICAL.md` step 3: use `npx wrangler d1 create uni-job-board --jurisdiction eu` (what was actually run) and explain why. Also mention that npm 12 blocks the `esbuild` and `workerd` install scripts during `npm ci`, and that this is harmless (tests and bundling work without them).
 
 ### Scraper
 
@@ -53,6 +57,13 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Deployment templates in `deploy/` and hosting docs in `docs/TECHNICAL.md`. (2026-11-16)
 
 ## Session log
+
+### 2026-11-16 (hosting setup, part 1)
+
+- Walked through the one-time setup with the owner. Step 1: nameservers are Cloudflare (checked with `dig`). Step 2: `npm ci`, owner ran `wrangler login`, verified with `wrangler whoami`. Step 3: D1 database created with `--jurisdiction eu`. Step 4: private data repo created on GitHub, initial commit pushed (`backup/`, `wheels/`, `.wrangler/` left out), `wrangler.toml` filled in. Step 5: `CLOUDFLARE_ACCOUNT_ID` secret set; API token not yet created.
+- Verified: Worker tests pass (22) after `npm ci`; esbuild works despite npm 12 blocking its install script; `wrangler deploy --dry-run` with the filled-in config succeeds (after `build-site`); the data repo is private; the unpushed code commits contain no domain, database ID or account ID.
+- Noted: the Worker custom domain creates its own DNS record on first deploy, which takes priority over any existing wildcard record.
+- Not done: code repo push (owner chose to wait until step 6), steps 5 (token) to 10, docs update for the EU jurisdiction flag.
 
 ### 2026-11-16
 
