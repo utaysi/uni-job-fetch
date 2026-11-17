@@ -16,6 +16,13 @@ const COLORS = [
 const FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const STATUS_FILTERS = ['Online', 'Offline', 'Needs Review'];
+const SORT_OPTIONS = [
+  ['newest', 'Newest first'],
+  ['oldest', 'Oldest first'],
+  ['deadline', 'Deadline soonest'],
+  ['title', 'Title A-Z'],
+  ['department', 'Department A-Z'],
+];
 const FETCH_POLL_MS = 20000;
 
 let allJobs = [];
@@ -24,6 +31,8 @@ let activeSources = new Set();
 let knownSources = new Set();
 let activeStatuses = new Set();
 let activeTags = new Set();
+let sortBy = 'newest';
+let serverOrder = new Map();
 let sourceCounts = {};
 let sourceChart = null;
 let timelineChart = null;
@@ -213,6 +222,49 @@ function buildTagPanel() {
     </button>`).join('');
 }
 
+function buildSortChips() {
+  const container = $('sortChips');
+  container.innerHTML = SORT_OPTIONS.map(([id, label]) => `
+    <button type="button" class="fetch-chip${sortBy === id ? ' active' : ''}" data-sort="${esc(id)}" aria-pressed="${sortBy === id}">
+      ${esc(label)}
+    </button>`).join('');
+}
+
+// ---------- Sorting ----------
+
+// The server sends ads newest first (first seen, then the order they were found
+// within that fetch), so the original position breaks ties between ads that
+// were first seen in the same fetch.
+function byFirstSeen(a, b) {
+  return (b.first_seen || '').localeCompare(a.first_seen || '')
+    || serverOrder.get(a.hash) - serverOrder.get(b.hash);
+}
+
+// Upcoming deadlines first (soonest first), then expired ones (most recent
+// first), then ads without a date we can read. Uses the same cut-off as the
+// "Expired" label so the order matches what the cards say.
+function deadlineKey(j, now) {
+  const d = parseDate(j.application_deadline);
+  if (!d) return [2, 0];
+  return d < now ? [1, -d.getTime()] : [0, d.getTime()];
+}
+
+function sortJobs(jobs) {
+  const text = (a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' });
+  const now = new Date();
+  const compare = {
+    newest: byFirstSeen,
+    oldest: (a, b) => byFirstSeen(b, a),
+    deadline: (a, b) => {
+      const ka = deadlineKey(a, now), kb = deadlineKey(b, now);
+      return ka[0] - kb[0] || ka[1] - kb[1] || byFirstSeen(a, b);
+    },
+    title: (a, b) => text(jobTitle(a), jobTitle(b)) || byFirstSeen(a, b),
+    department: (a, b) => text(a.department || 'Unknown', b.department || 'Unknown') || byFirstSeen(a, b),
+  }[sortBy] || byFirstSeen;
+  return jobs.slice().sort(compare);
+}
+
 function updateTagSuggestions() {
   const list = $('tagSuggestions');
   list.innerHTML = '';
@@ -327,7 +379,7 @@ function detailsHtml(j) {
 }
 
 function cardHtml(j, i, animate) {
-  const status = deadlineStatus(j.application_deadline);
+  const status = j.application_deadline ? deadlineStatus(j.application_deadline) : { text: '', cls: '' };
   const isOpen = me && expanded.has(j.hash);
   const tagIds = tagIdsByJob.get(j.hash) || [];
   const noteCount = (notesByJob.get(j.hash) || []).length;
@@ -335,6 +387,8 @@ function cardHtml(j, i, animate) {
   const offline = j.status === 'Offline' ? '<span style="color:var(--text-muted)">offline</span>' : '';
   const notesLabel = me && noteCount ? `<span>${noteCount} note${noteCount === 1 ? '' : 's'}</span>` : '';
   const pdf = j.pdf ? encodeURI(j.pdf) : '';
+  const deadline = j.application_deadline ? formatDate(j.application_deadline) : '-';
+  const seen = j.first_seen ? formatDate(j.first_seen) : '-';
   const classes = ['job-card', isOpen ? 'expanded' : '', animate ? '' : 'no-anim'].filter(Boolean).join(' ');
   return `
     <div class="${classes}" data-hash="${esc(j.hash)}" style="animation-delay:${Math.min(i * 0.03, 0.5)}s">
@@ -348,9 +402,12 @@ function cardHtml(j, i, animate) {
         </div>
         ${!isOpen && tagIds.length ? `<div class="job-tags">${tagIds.map(id => tagChip(id, false)).join('')}</div>` : ''}
       </div>
-      <div class="job-deadline">
-        <div class="deadline-date">${j.application_deadline ? esc(formatDate(j.application_deadline)) : '-'}</div>
-        <div class="deadline-status ${status.cls}">${esc(status.text)}</div>
+      <div class="job-dates">
+        <span class="date-label">Deadline</span>
+        <span class="deadline-date${status.text ? '' : ' wide'}" title="${esc(j.application_deadline || 'No deadline detected')}">${esc(deadline)}</span>
+        ${status.text ? `<span class="deadline-status ${status.cls}">${esc(status.text)}</span>` : ''}
+        <span class="date-label">First seen</span>
+        <span class="seen-date"${j.first_seen ? ` title="First found by a fetch on ${esc(formatBerlinStamp(j.first_seen))} (Berlin time)"` : ''}>${esc(seen)}</span>
       </div>
       <div class="job-actions">
         ${pdf ? `<a class="action-btn small" href="${esc(pdf)}" target="_blank" rel="noopener noreferrer">PDF</a>` : ''}
@@ -502,7 +559,7 @@ function renderCharts(jobs) {
 }
 
 function render() {
-  const jobs = getFilteredJobs();
+  const jobs = sortJobs(getFilteredJobs());
   updateStats();
   renderJobs(jobs);
   renderCharts(jobs);
@@ -727,6 +784,7 @@ async function startFetch() {
 
 function indexJobs() {
   jobsByHash = new Map(allJobs.map(j => [j.hash, j]));
+  serverOrder = new Map(allJobs.map((j, i) => [j.hash, i]));
 }
 
 async function reloadJobs() {
@@ -796,6 +854,7 @@ async function init() {
   indexJobs();
   buildSourceList();
   buildFetchChips();
+  buildSortChips();
   setupLocalHandlers();
   await detectHosted();
   render();
@@ -804,6 +863,14 @@ async function init() {
 $('searchInput').addEventListener('input', render);
 $('dateFrom').addEventListener('change', render);
 $('dateTo').addEventListener('change', render);
+
+$('sortChips').addEventListener('click', e => {
+  const chip = e.target.closest('[data-sort]');
+  if (!chip || chip.dataset.sort === sortBy) return;
+  sortBy = chip.dataset.sort;
+  buildSortChips();
+  render();
+});
 
 $('clearFilters').addEventListener('click', () => {
   $('searchInput').value = '';

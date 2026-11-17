@@ -412,19 +412,40 @@ body {
   gap: 0.25rem;
 }
 
-.job-deadline {
-  text-align: right;
+/* Deadline and first seen, one per line. Fixed column widths keep the dates
+   lined up from card to card. */
+.job-dates {
+  display: grid;
+  grid-template-columns: 4.25rem 5.75rem 4rem;
+  column-gap: 0.5rem;
+  row-gap: 0.125rem;
+  align-items: baseline;
   flex-shrink: 0;
 }
 
-.deadline-date {
-  font-size: 0.8125rem;
-  font-weight: 600;
+.date-label {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
 }
+
+.deadline-date,
+.seen-date {
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deadline-date { font-weight: 600; }
+.deadline-date.wide,
+.seen-date { grid-column: span 2; }
+.seen-date { color: var(--text-dim); }
 
 .deadline-status {
   font-size: 0.6875rem;
-  margin-top: 0.125rem;
+  white-space: nowrap;
 }
 
 .deadline-future { color: var(--green); }
@@ -728,8 +749,9 @@ body {
 }
 
 @media (max-width: 600px) {
-  .job-card { grid-template-columns: auto 1fr auto; }
-  .job-actions { grid-column: 2 / -1; }
+  /* Title and PDF button on the first row, dates on the second. */
+  .job-card { grid-template-columns: auto 1fr auto; row-gap: 0.625rem; }
+  .job-dates { grid-column: 2 / -1; grid-row: 2; }
 }
 </style>
 </head>
@@ -791,6 +813,11 @@ body {
     <div class="panel">
       <div class="panel-header">Status</div>
       <div class="fetch-chips" id="fetchChips"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">Sort by</div>
+      <div class="fetch-chips" id="sortChips"></div>
     </div>
 
     <div class="panel" id="tagPanel" hidden>
