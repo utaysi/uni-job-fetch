@@ -147,7 +147,8 @@ body {
 
 @media (max-width: 900px) {
   .layout {
-    grid-template-columns: 1fr;
+    /* minmax(0, ...) lets the column shrink below long department names. */
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -300,13 +301,14 @@ body {
 /* Charts */
 .charts-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, ...) lets the charts shrink when the window gets narrower. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1.5rem;
 }
 
 @media (max-width: 700px) {
   .charts-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
