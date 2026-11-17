@@ -6,10 +6,11 @@ remote PDF basename. Downloads are returned as raw bytes for hashing/storage.
 """
 
 import html
+import http.client
 import os
 import re
+import ssl
 import urllib.parse
-import urllib.request
 
 MAIN_URL = ('https://www.uni-marburg.de/de/universitaet/administration/verwaltung/'
             'dezernat2/personalabteilung/bewerber/stud-und-wiss-hilfskraftstellen')
@@ -57,30 +58,107 @@ MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_PDF_BYTES = 25 * 1024 * 1024
 
 
-class _UniversityOnlyRedirects(urllib.request.HTTPRedirectHandler):
-    """Checks a redirect target before following it, so no request ever leaves the university."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if not is_allowed_url(newurl):
-            fp.close()
-            raise ValueError(f'redirected to non-university URL: {newurl}')
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+HEADERS = {'User-Agent': 'Mozilla/5.0'}
+REDIRECT_CODES = {301, 302, 303, 307, 308}
+MAX_REDIRECTS = 10
 
 
-_opener = urllib.request.build_opener(_UniversityOnlyRedirects)
+class HTTPStatusError(Exception):
+    """The final answer was not a success, for example 403 for a protected PDF."""
+
+    def __init__(self, status, reason, url):
+        super().__init__(f'HTTP Error {status}: {reason}')
+        self.status = status
+        self.url = url
+
+
+def _https_connection(host, port, timeout):
+    return http.client.HTTPSConnection(host, port, timeout=timeout,
+                                       context=ssl.create_default_context())
+
+
+class KeepAliveClient:
+    """GET requests that reuse one open HTTPS connection per host.
+
+    urllib opens a new connection for every request. The university's servers hold
+    back new connections that arrive in quick succession (1 to 5 seconds each), so a
+    fetch of about 100 pages and PDFs took 2 to 6 minutes on GitHub. Over one open
+    connection the same requests take a few seconds.
+
+    Every URL, including each redirect target, is checked with is_allowed_url before
+    it is requested, and every response body is capped at max_bytes.
+    """
+
+    def __init__(self, connect=_https_connection):
+        self._connect = connect
+        self._conns = {}
+
+    def get(self, url, timeout, max_bytes):
+        if not is_allowed_url(url):
+            raise ValueError(f'refusing to fetch non-university URL: {url}')
+        for _ in range(MAX_REDIRECTS + 1):
+            status, reason, location, data = self._get_once(url, timeout, max_bytes)
+            if status in REDIRECT_CODES and location:
+                target = urllib.parse.urljoin(url, location)
+                if not is_allowed_url(target):
+                    raise ValueError(f'redirected to non-university URL: {target}')
+                url = target
+                continue
+            if not 200 <= status < 300:
+                raise HTTPStatusError(status, reason, url)
+            return data
+        raise ValueError(f'too many redirects: {url}')
+
+    def close(self):
+        for key in list(self._conns):
+            self._drop(key)
+
+    def _get_once(self, url, timeout, max_bytes):
+        parts = urllib.parse.urlsplit(url)
+        key = (parts.hostname, parts.port or 443)
+        target = (parts.path or '/') + (f'?{parts.query}' if parts.query else '')
+        for attempt in (1, 2):
+            conn = self._conns.get(key)
+            if conn is None:
+                conn = self._conns[key] = self._connect(key[0], key[1], timeout)
+            reused = conn.sock is not None
+            conn.timeout = timeout
+            if reused:
+                conn.sock.settimeout(timeout)
+            try:
+                conn.request('GET', target, headers=HEADERS)
+                resp = conn.getresponse()
+                data = resp.read(max_bytes + 1)
+            except (ConnectionError, http.client.BadStatusLine):
+                self._drop(key)
+                if reused and attempt == 1:
+                    continue  # the server closed the idle connection; ask once more on a new one
+                raise
+            except Exception:
+                self._drop(key)
+                raise
+            if not resp.isclosed():
+                self._drop(key)  # part of the body is still unread, so the connection is unusable
+            if len(data) > max_bytes:
+                raise ValueError(f'response larger than {max_bytes} bytes: {url}')
+            return resp.status, resp.reason, resp.getheader('Location'), data
+
+    def _drop(self, key):
+        conn = self._conns.pop(key, None)
+        if conn is not None:
+            conn.close()
+
+
+_client = KeepAliveClient()
 
 
 def _read_capped(url, timeout, max_bytes):
-    if not is_allowed_url(url):
-        raise ValueError(f'refusing to fetch non-university URL: {url}')
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with _opener.open(req, timeout=timeout) as resp:
-        if not is_allowed_url(resp.geturl()):
-            raise ValueError(f'redirected to non-university URL: {resp.geturl()}')
-        data = resp.read(max_bytes + 1)
-    if len(data) > max_bytes:
-        raise ValueError(f'response larger than {max_bytes} bytes: {url}')
-    return data
+    return _client.get(url, timeout, max_bytes)
+
+
+def close():
+    """Close the open connections (call when the fetch is done)."""
+    _client.close()
 
 
 def fetch_page(url, log):

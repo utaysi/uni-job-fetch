@@ -131,6 +131,7 @@ def cmd_fetch(args):
         flag = ' [REVIEW]' if fields.get('needs_review') else ''
         print(f"  [{i}/{len(ads)}] NEW {filename}{flag}")
 
+    scrape.close()
     offline = store.mark_offline_missing(conn, seen_hashes)
     rechecked = recheck_deadlines(conn)
     conn.commit()
