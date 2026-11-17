@@ -7,6 +7,7 @@ Status markers: `[ ]` to do, `[~]` in progress, `[x]` done. Put the newest sessi
 ## In progress
 
 - Hosted dashboard: setup and live verification done (2026-11-17). Left for a future session: check that the scheduled run (04:17 UTC, first one due 2026-11-18) starts; see the live verification task.
+- [~] Second security audit of the public code repo (all commits since the 2026-11-16 audit, plus the working tree), and an AGENTS.md rule so every agent checks for leaks before committing or pushing.
 
 ## To do
 
@@ -40,15 +41,19 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 ### Dashboard
 
 - [x] Show "First seen" under the deadline in each card, sort the list by first seen (newest first) by default, add sort options in the sidebar, and add a "No tags" filter. (2026-11-17)
-- [ ] Check the new date column, sort options and "No tags" filter on the hosted dashboard with real tags. Deployed 2026-11-17 (code `e53ed65`); not yet looked at while logged in.
+- [ ] Check the new date column, sort options, "No tags" filter and note badges on the hosted dashboard with real tags. Deployed 2026-11-17 (code `e53ed65`, badges in `10d1022`); not yet looked at while logged in.
 - [x] Deadlines with German month names (`07. Juli 2026`) and free text (`mind. 2 Wochen`) are read; see the deadline detection task below. (2026-11-17)
 - [x] The deadline day itself counts as open and shows "Today"; "Expired" starts the day after. (2026-11-17)
 - [x] Notes are easy to spot: a note icon with the number of notes next to the title replaces the small "1 note" text. (2026-11-17)
 - [x] Deadline detection: analyzed all 39 ads (of 116) whose deadline was missing or unreadable and moved detection into `src/deadline.py` with unit tests. Every ad now gets a date, a period after posting (shown as an estimate), "No deadline" (rolling or not stated) or "Unknown" (scanned PDF). Every fetch re-checks all stored ads. (2026-11-17)
 - [x] Needs review mark: anyone on the council can set or clear it in the opened ad (D1 table `review_flags`, `PUT /api/jobs/<hash>/review`); it overrides the parser's flag and shows who changed it last. (2026-11-17)
-- [ ] Check on the live board: note badges, the review mark (set and clear, with two accounts if possible), and a few deadlines (the `elo-hilfskraft_26_11_2` ad should say 25 Nov 2026, the physics "Dauerausschreibung" ads "No deadline"). Deployed 2026-11-17; the deploy's re-check updated 23 deadlines as expected.
+- [x] Check on the live board: the review mark (set and clear) and a few deadlines (the `elo-hilfskraft_26_11_2` ad says 25 Nov 2026, the physics "Dauerausschreibung" ads "No deadline"). Confirmed by the owner (2026-11-17). Note badges moved to the check above.
 - [x] Deadline corrections: in the opened ad, anyone on the council can set another date or "No deadline", or go back with "Use detected" (D1 table `deadline_overrides`, `PUT`/`DELETE /api/jobs/<hash>/deadline`). The card shows a pencil next to "Deadline"; the tooltip says who set it and what was detected. (2026-11-17, deployed.)
-- [ ] On the live board: set a date on one ad, change it to "No deadline", then "Use detected".
+- [x] On the live board: set a date on one ad, change it to "No deadline", then "Use detected". Confirmed by the owner (2026-11-17).
+- [x] Departments filter: all departments start selected; clicking one while all are selected shows only that one, further clicks add or remove departments (removing the last one selects all), and an "All" row at the top selects all again. (2026-11-17)
+- [x] Tab icon: a purple briefcase with a smiling face (`web/favicon.svg`, plus `favicon-32.png` and `apple-touch-icon.png`) instead of the browser's empty placeholder. (2026-11-17)
+- [x] Show that the board fetches automatically every 24 hours: "Auto-fetch every 24 h" under the Fetch now counter, with a tooltip; shown on the hosted board only. (2026-11-17)
+- [ ] On the live board: the Departments "All" row and single-select, the tab icon (also in Safari if anyone uses it), and the auto-fetch note.
 - [ ] One ad (`ausschreibung-praktikumsstelle`, a poster) is a scanned image with no text layer, so it shows "Unknown". It gives no deadline (checked by eye). Optional: OCR scanned PDFs with Tesseract (needs `tesseract-ocr` and `tesseract-ocr-deu` installed in the workflow, and the German language pack locally).
 - [ ] Job-ID extraction picks up wrong text on several ads, for example `in`, `bitte ausfüllen`, `in einer PDF-Datei an` and IDs with `Umfang: 11h/Monat` appended. Analyze like the deadlines. (Found 2026-11-17.)
 
@@ -89,6 +94,17 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Workflow: a run that waited in the queue checked out stale data, so its data push failed and it did not deploy. The data checkout now uses the branch. (2026-11-17)
 
 ## Session log
+
+### 2026-11-17 (departments filter, tab icon, auto-fetch note)
+
+- Owner confirmed on the live board: deadline corrections (date, "No deadline", "Use detected"), setting and clearing the review mark, `elo-hilfskraft_26_11_2` showing 25 Nov 2026, and the physics "Dauerausschreibung" ads showing "No deadline". Those tasks are marked done; the note badges check moved to the open date column check.
+- Departments filter: an "All" row (total count, multicolor dot) at the top. With all selected, only "All" is highlighted; clicking a department shows only that one, further clicks add or remove departments, removing the last one selects all again, and picking every department one by one also ends at "All". The panel header shows "N of M" while narrowed. Rows work with Enter and Space. On reload, new departments join only an all-selected filter.
+- Tab icon: purple briefcase with a smiling face in the page's colors, as SVG with a 32px PNG fallback and a 180px apple-touch icon; `build-site` copies all three.
+- "Auto-fetch every 24 h" note with a refresh icon under the "N/3 left today" counter; the tooltip says it runs early in the morning (Berlin time) and does not count toward the limit. It shows on the hosted board even without the GitHub token (then without button and counter); the local dashboard shows neither.
+- Also committed the earlier session's uncommitted `docs/TECHNICAL.md` rewrite of setup steps 7 and 8 (real Cloudflare and GitHub menu names), as its own docs commit.
+- Verified: headless Chromium against a mock of the hosted API (Worker CSP added to the page) in three modes (hosted with fetch, hosted without token, local): every Departments click sequence above, keyboard, "Clear filters", card counts match the API data for each selection, the three icons answer 200 with the right types, the fetch controls show or hide as described, no horizontal scroll at 375px and 800px, no page errors or CSP violations. Icons checked by eye at 16, 32 and 180px. Real `jobs.py serve` serves the icons; `build-site` output contains them. Worker tests (28), Python tests (35) and `py_compile` pass.
+- Pushed `master` (`08eacbe`) and deployed with a manual run of the data repo workflow, at the owner's request. The run passed in 5m43s: it checked out `08eacbe`, uploaded 6 changed files including the three icons, and the fetch found 74 ads still online and 0 newly offline. Afterwards `/`, `/favicon.svg`, `/app.js` and `/api/jobs.json` all answer 302 to the Access login.
+- Not verified: the new features on the live board while logged in, and the icon in Safari.
 
 ### 2026-11-17 (deadline corrections, deploys)
 
