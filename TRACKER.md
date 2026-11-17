@@ -54,6 +54,8 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Show that the board fetches automatically every 24 hours: "Auto-fetch every 24 h" under the Fetch now counter, with a tooltip; shown on the hosted board only. (2026-11-17)
 - [ ] On the live board: the Departments "All" row and single-select, the tab icon (also in Safari if anyone uses it), and the auto-fetch note.
 - [x] Sidebar order: Departments, Tags, Sort by, Status, Deadline range (with "Clear filters" now at the bottom). (2026-11-17)
+- [x] Login tracking, visible only to the owner: the Worker records each member's Access logins (D1 table `logins`), and a Members panel at the bottom of the sidebar, shown only to emails in `ADMIN_EMAILS` (private config), lists who logged in and when. (2026-11-17, deployed.)
+- [ ] On the live board, logged in as the owner: the Members panel shows with the owner's own row. Reload the page two or three times, then check in D1 (`SELECT email, login_at, last_seen_at FROM logins`, from `worker/` with `--remote -c ../data/wrangler.toml`) that it is still one row with a newer `last_seen_at`. That confirms the Access token's `iat` stays the same within a session; if every load adds a row, the rows are visits, not logins. Also check that a second member's account does not see the panel.
 - [ ] One ad (`ausschreibung-praktikumsstelle`, a poster) is a scanned image with no text layer, so it shows "Unknown". It gives no deadline (checked by eye). Optional: OCR scanned PDFs with Tesseract (needs `tesseract-ocr` and `tesseract-ocr-deu` installed in the workflow, and the German language pack locally).
 - [ ] Job-ID extraction picks up wrong text on several ads, for example `in`, `bitte ausfüllen`, `in einer PDF-Datei an` and IDs with `Umfang: 11h/Monat` appended. Analyze like the deadlines. (Found 2026-11-17.)
 
@@ -96,8 +98,25 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Worker: Access token verification on every request, notes/tags/fetch API with limits, security headers, D1 schema, 22 tests. (2026-11-16)
 - [x] Deployment templates in `deploy/` and hosting docs in `docs/TECHNICAL.md`. (2026-11-16)
 - [x] Workflow: a run that waited in the queue checked out stale data, so its data push failed and it did not deploy. The data checkout now uses the branch. (2026-11-17)
+- [x] Release post for the council group chat drafted (2026-11-17): the board is online with email login, plus the dashboard changes since 2026-11-15, in plain language. Kept outside the repo.
 
 ## Session log
+
+### 2026-11-17 (login tracking for the owner)
+
+- Question from the owner: can we track when each user logs in? Before this change, no: the Worker only checked the Access token, and D1 only recorded changes (notes, tags, marks, corrections, Fetch now clicks), not visits. Cloudflare Zero Trust keeps its own Access login log, but only briefly on the Free plan. The owner chose an in-board list visible only to them; no notice to members.
+- Worker: `authenticate()` now returns `{email, loginAt}`, with `loginAt` taken from the Access token's `iat`. `GET /api/me` (asked once per page load) upserts a row into the new D1 table `logins` (migration 0004; one row per Access session, `login_at` plus `last_seen_at`, which never moves backwards) and returns `admin`. A failed write is logged and the page still loads. New `GET /api/logins`, only for emails in the new `ADMIN_EMAILS` var (comma-separated, case-insensitive, exact match; unset means nobody): per member the login count, first and last login and last seen, plus the sessions of the last 90 days (at most 500). Everyone else gets 403.
+- Dashboard: a "Members" panel ("Only you see this") at the bottom of the sidebar, shown only when `api/me` says admin. One `<details>` row per member, most recently seen first, with "just now", "3 h ago", "yesterday", "N days ago" or the date (green if seen today); opened, it shows the full email, "N logins since ...", up to 10 sessions with start and last page load, and "N more in the last 90 days". Other members and the local dashboard never request the list.
+- Config: `ADMIN_EMAILS` added (empty) to `deploy/wrangler.example.toml`, and set to the owner's login email in the private `data/wrangler.toml` (committed and pushed in the data repo). Docs: features, what lives where, security, "Seeing who logged in" under Day to day.
+- Verified: Worker tests (35, including a valid token passing through `index.js` to `/api/me`, `/api/logins` and the page), Python tests (35) and `py_compile` pass. Headless Chromium against a mock of the hosted API with the Worker's CSP, in five modes: admin (rows, relative times, order, escaping of markup in an address, open and close with mouse and Enter, 10 sessions plus "4 more", a session across midnight, a member with logins only before the 90-day window), admin at 375px (no sideways scroll), empty list, 403 from the server, normal member and local (panel hidden, list never requested); no page errors or CSP violations. Screenshots checked by eye. `build-site` output contains the panel. `wrangler deploy --dry-run` with the private config shows the new binding. Leak check passed before every commit and the push.
+- At the owner's request: pushed `master` (`08bde6a`) and the data repo config, and deployed with a manual run of the data repo workflow. The run passed in 4m43s: it built from `08bde6a`, applied migration `0004_logins.sql`, uploaded the changed page files and the Worker; the fetch found 77 ad links, 74 still online, 0 new, 0 newly offline, and the 3 known 403 PDFs. Afterwards `/`, `/app.js`, `/api/me` and `/api/logins` all answer 302 to the Access login without a token, and the `logins` table exists in the remote D1 database (0 rows, nobody had loaded the page yet).
+- Not verified: the panel on the live board while logged in, and that the Access token's `iat` stays the same across page loads in one session (see the new Dashboard task). Note that the daily `annotations.sql` backup in the private data repo now also holds the login rows.
+
+### 2026-11-17 (release post)
+
+- Drafted a release post for the council group chat from the commits and session log since 2026-11-15, sorted by usefulness to members: online with email login, shared notes and tags, daily and manual fetch, deadline detection and corrections, review mark, first seen and sorting, departments filter, phone layout, tab icon. The draft is not stored in the repo.
+- Flagged to the owner: the post announces the daily fetch, but the first scheduled run (due 2026-11-18) is not confirmed yet; several new features are not yet checked on the live board while logged in (see the Dashboard tasks); the main page still yields 0 ads (see Scraper).
+- No code changes.
 
 ### 2026-11-17 (why an ad shows Offline)
 
