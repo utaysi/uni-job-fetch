@@ -31,6 +31,7 @@ let activeSources = new Set();
 let knownSources = new Set();
 let activeStatuses = new Set();
 let activeTags = new Set();
+let filterUntagged = false;
 let sortBy = 'newest';
 let serverOrder = new Map();
 let sourceCounts = {};
@@ -213,10 +214,16 @@ function buildTagPanel() {
   const tags = [...tagsById.values()].sort((a, b) => a.name.localeCompare(b.name));
 
   if (!tags.length) {
+    // Without any tags every ad is untagged, so the "No tags" filter would do nothing.
+    filterUntagged = false;
     container.innerHTML = '<span class="muted">No tags yet. Open an ad to add one.</span>';
     return;
   }
-  container.innerHTML = tags.map(t => `
+  const untagged = allJobs.filter(j => !(tagIdsByJob.get(j.hash) || []).length).length;
+  container.innerHTML = `
+    <button type="button" class="fetch-chip untagged${filterUntagged ? ' active' : ''}" data-untagged="1">
+      No tags (${untagged})
+    </button>` + tags.map(t => `
     <button type="button" class="fetch-chip${activeTags.has(t.id) ? ' active' : ''}" data-tag-id="${esc(t.id)}">
       ${esc(t.name)} (${counts.get(t.id) || 0})
     </button>`).join('');
@@ -291,9 +298,11 @@ function getFilteredJobs() {
     if (!activeSources.has(j.department || 'Unknown')) return false;
     if (!jobMatchesStatus(j)) return false;
 
-    if (activeTags.size) {
+    // Tag chips and "No tags" combine with OR: an ad shows if it matches any of them.
+    if (activeTags.size || filterUntagged) {
       const ids = tagIdsByJob.get(j.hash) || [];
-      if (!ids.some(id => activeTags.has(id))) return false;
+      const match = (filterUntagged && !ids.length) || ids.some(id => activeTags.has(id));
+      if (!match) return false;
     }
 
     if (search) {
@@ -613,14 +622,13 @@ async function loadAnnotations() {
 }
 
 // After any change: refresh shared data so everyone's latest edits show up too.
+// The edited card is updated in place and stays visible even if it no longer
+// matches the tag filter (for example after tagging an ad under "No tags"), so
+// several tags can be added in a row. The list catches up on the next filter change.
 async function afterChange(hash) {
   await loadAnnotations();
   buildTagPanel();
   updateTagSuggestions();
-  if (activeTags.size) {
-    render();
-    return null;
-  }
   return updateCard(hash);
 }
 
@@ -725,10 +733,14 @@ function setupHostedHandlers() {
   });
 
   $('tagChips').addEventListener('click', e => {
-    const chip = e.target.closest('[data-tag-id]');
+    const chip = e.target.closest('[data-tag-id], [data-untagged]');
     if (!chip) return;
-    const id = Number(chip.dataset.tagId);
-    if (activeTags.has(id)) activeTags.delete(id); else activeTags.add(id);
+    if (chip.dataset.untagged) {
+      filterUntagged = !filterUntagged;
+    } else {
+      const id = Number(chip.dataset.tagId);
+      if (activeTags.has(id)) activeTags.delete(id); else activeTags.add(id);
+    }
     buildTagPanel();
     render();
   });
@@ -883,6 +895,7 @@ $('clearFilters').addEventListener('click', () => {
   activeStatuses.add('Online');
   updateFetchChips();
   activeTags.clear();
+  filterUntagged = false;
   if (me) buildTagPanel();
   render();
 });

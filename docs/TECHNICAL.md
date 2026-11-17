@@ -87,7 +87,7 @@ The dashboard can be hosted at an address like `board.example.org`, so that staf
 The hosted version adds features the local dashboard does not have:
 
 - **Notes** on each ad, signed with the author's name and time. Everyone can add notes; only the author can edit or delete their own.
-- **Tags** on each ad: type a new one or pick an existing one, then filter the list by tag. A tag disappears once it is removed from every ad.
+- **Tags** on each ad: type a new one or pick an existing one, then filter the list by tag, or pick "No tags" to see only ads nobody has tagged yet. Selected tag filters combine with "or". A tag disappears once it is removed from every ad.
 - **Last fetched**: when the job list was last updated.
 - **Fetch now**: starts an extra fetch. All council members share 3 per day, which reset at midnight Berlin time.
 
