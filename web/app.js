@@ -430,14 +430,19 @@ function detailsHtml(j) {
     </div>`;
 }
 
+const NOTE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+
 function cardHtml(j, i, animate) {
   const dl = deadlineView(j);
   const isOpen = me && expanded.has(j.hash);
   const tagIds = tagIdsByJob.get(j.hash) || [];
   const noteCount = (notesByJob.get(j.hash) || []).length;
+  const notesWord = `${noteCount} note${noteCount === 1 ? '' : 's'}`;
+  const notesBadge = me && noteCount
+    ? `<span class="note-badge" title="${notesWord}" aria-label="${notesWord}">${NOTE_ICON}${noteCount}</span>`
+    : '';
   const review = j.needs_review ? '<span style="color:var(--orange)">&#9888; review</span>' : '';
   const offline = j.status === 'Offline' ? '<span style="color:var(--text-muted)">offline</span>' : '';
-  const notesLabel = me && noteCount ? `<span>${noteCount} note${noteCount === 1 ? '' : 's'}</span>` : '';
   const pdf = j.pdf ? encodeURI(j.pdf) : '';
   const seen = j.first_seen ? formatDate(j.first_seen) : '-';
   const classes = ['job-card', isOpen ? 'expanded' : '', animate ? '' : 'no-anim'].filter(Boolean).join(' ');
@@ -445,11 +450,14 @@ function cardHtml(j, i, animate) {
     <div class="${classes}" data-hash="${esc(j.hash)}" style="animation-delay:${Math.min(i * 0.03, 0.5)}s">
       <div class="job-source-badge" style="background:${sourceColor(j.department || 'Unknown')}"></div>
       <div class="job-info">
-        <div class="job-title">${esc(jobTitle(j))}</div>
+        <div class="job-title-row">
+          <div class="job-title">${esc(jobTitle(j))}</div>
+          ${notesBadge}
+        </div>
         <div class="job-meta">
           <span>${esc(j.department || 'Unknown')}</span>
           ${j.job_id ? `<span>${esc(j.job_id)}</span>` : ''}
-          ${review} ${offline} ${notesLabel}
+          ${review} ${offline}
         </div>
         ${!isOpen && tagIds.length ? `<div class="job-tags">${tagIds.map(id => tagChip(id, false)).join('')}</div>` : ''}
       </div>
