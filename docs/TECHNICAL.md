@@ -96,6 +96,8 @@ path to `src\jobs.py` is correct.
 
 The dashboard can be hosted at an address like `board.example.org`, so that staff council members can open it from anywhere after logging in. Nothing runs on your own server: GitHub runs the daily fetch, and Cloudflare serves the page and handles the login. Both are used within their free plans.
 
+To keep each run short (GitHub Actions minutes are limited on private repos), the fetcher keeps one connection open per server for all pages and PDFs, instead of opening a new one per request. The university's servers delay new connections that arrive in quick succession (1 to 5 seconds each), which made the fetch step take 2 to 6 minutes; over one connection the same requests take a few seconds.
+
 The hosted version adds features the local dashboard does not have:
 
 - **Notes** on each ad, signed with the author's name and time. Everyone can add notes; only the author can edit or delete their own. Ads with notes show a note icon with the number of notes next to the title.
@@ -124,8 +126,7 @@ Clicking an ad on the hosted dashboard opens its deadline, review mark, tags and
 - **No other addresses.** The `*.workers.dev` address and preview URLs are disabled.
 - **Safe writes.** Changes must come from the dashboard itself (Origin check) as JSON, and all database queries use bound parameters. Notes are limited to 2,000 characters and tags to 30. Each person can make up to 300 changes a day.
 - **No script injection.** Everything from the ads or from users is escaped before it is shown, and a strict Content Security Policy only allows the dashboard's own scripts. The page loads nothing from other websites.
-- **Narrow fetcher.** The scraper only downloads `https` links on `uni-marburg.de`, checks every redirect before following it, caps every download (5 MB per page, 25 MB per PDF), and runs on a temporary GitHub machine.
-- **Login list for the owner only.** The Worker answers `/api/logins` only for emails listed in `ADMIN_EMAILS`; everyone else gets 403, whatever the page shows. Without the setting nobody can read it.
+- **Narrow fetcher.** The scraper only downloads `https` links on `uni-marburg.de`, checks every redirect before following it, caps every download (5 MB per page, 25 MB per PDF), and runs on a temporary GitHub machine. `tests/test_scrape.py` covers these checks.- **Login list for the owner only.** The Worker answers `/api/logins` only for emails listed in `ADMIN_EMAILS`; everyone else gets 403, whatever the page shows. Without the setting nobody can read it.
 - **Small secrets.** The Fetch now button uses a GitHub token that can only start and view workflow runs in the data repo. It cannot read or change code or data.
 - **Secrets only where needed.** In the daily workflow, the Cloudflare token is passed only to the three `wrangler` steps, not to the steps that install packages or read downloaded PDFs. Python packages are installed from `requirements.lock` with pinned hashes, so a newly published (possibly malicious) package version never runs next to the secrets.
 
