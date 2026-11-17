@@ -171,20 +171,28 @@ You need a Cloudflare account that manages your domain, a GitHub account, and No
 
 6. **Run the workflow once.** In the data repo, open Actions > Update board > Run workflow. This fetches ads, commits the data, and deploys the Worker. Opening the board address now shows **Forbidden**. That is expected: the Worker refuses everyone until the login is set up.
 
-7. **Turn on the login.**
-   - In Cloudflare, open Workers & Pages > uni-job-board and enable **Cloudflare Access** for this Worker, covering production and previews.
-   - Set the login method to **One-time PIN**.
-   - Add an **Allow** policy whose Include rule is **Emails**, listing each council member's address. Never use "Everyone" or an email domain rule, or anyone with such an address could get in.
-   - Copy the application's **AUD tag** and your **team domain** (`<your-team>.cloudflareaccess.com`, found in Zero Trust settings) into `TEAM_DOMAIN` and `POLICY_AUD` in `data/wrangler.toml`.
+7. **Turn on the login.** Menu names below are from the Cloudflare dashboard as of November 2026; Cloudflare renames things now and then.
+   - **Set up Zero Trust (first time only).** Open **Zero Trust** in the Cloudflare dashboard, choose a team name (it becomes your team domain, `<your-team>.cloudflareaccess.com`) and pick the **Free** plan.
+   - **Check the login method.** Under **Integrations > Identity providers**, make sure **One-time PIN** is available.
+   - **Create the policy first.** Under **Access controls > Policies**, create a reusable policy, for example "Council members", with Action **Allow** and an Include rule **Emails** listing each council member's address. Never use "Everyone" or an email domain rule, or anyone with such an address could get in. Create it here first, because the Worker's Access dialog only offers existing policies.
+   - **Attach it to the Worker.** Open **Workers & Pages > uni-job-board** and its **Access** tab. Enable Cloudflare Access for **all traffic (production and preview URLs)**, not "previews only", and select the policy.
+   - **Read the team domain and AUD tag.** Every address on the board now redirects to the login, and the redirect carries both values:
+
+     ```bash
+     curl -sI https://board.example.org | grep -i '^location'
+     ```
+
+     The host of that address is your team domain, and the value after `kid=` is the AUD tag. Put them into `TEAM_DOMAIN` and `POLICY_AUD` in `data/wrangler.toml`.
    - Commit, push, and run the workflow again. The board now asks for an email and shows the dashboard after the code is entered.
 
 8. **Enable the Fetch now button.**
-   - On GitHub, go to Settings > Developer settings > Fine-grained tokens > Generate new token.
-   - Repository access: **Only select repositories** > the data repo. Permissions: **Actions: Read and write**, nothing else. Expiration: 1 year (set a reminder to renew it).
-   - Then, from `worker/`:
+   - On GitHub, open your profile picture > **Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token**.
+   - Resource owner: your account. Repository access: **Only select repositories** > the data repo. Permissions: **Actions: Read and write**, nothing else (GitHub adds **Metadata: Read-only** by itself). Expiration: 1 year (set a reminder to renew it).
+   - Then, from `worker/`, run the command below and paste the token when asked. Do not put the token on the command line or in a file.
 
    ```bash
    npx wrangler secret put GITHUB_TOKEN -c ../data/wrangler.toml
+   npx wrangler secret list -c ../data/wrangler.toml   # should list GITHUB_TOKEN
    ```
 
    The button appears after the next page load. Without the token the dashboard works, but the button stays hidden.
@@ -202,7 +210,7 @@ You need a Cloudflare account that manages your domain, a GitHub account, and No
 
 ### Day to day
 
-- **Adding or removing council members:** edit the email list in the Access policy. It takes effect immediately; nothing needs redeploying.
+- **Adding or removing council members:** in Zero Trust, open **Access controls > Policies**, edit the policy (for example "Council members") and change its email list. It takes effect immediately; nothing needs redeploying.
 - **Correcting parsed fields with Excel:** `data/` is now a git repo, so pull first, then use the CLI as usual, then push:
 
   ```bash
