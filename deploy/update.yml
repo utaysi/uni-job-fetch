@@ -32,7 +32,9 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # A normal run takes about a minute. Stop a stuck one (for example the university site
+    # not answering) before it uses up Actions minutes. The next run tries again.
+    timeout-minutes: 10
     env:
       TZ: Europe/Berlin
     steps:
