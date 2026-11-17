@@ -70,7 +70,7 @@ Run **Serve dashboard** to explore the repository in the browser: totals at a gl
   <img src="docs/images/dashboard.png" alt="Uni Jobs dashboard" width="100%">
 </p>
 
-- **Filters**: by department, status (Online / Offline / Needs Review), and a custom deadline range.
+- **Filters**: by department, status (Online / Offline / Needs Review), and a custom deadline range. All departments start selected; click one to see only that department, click more to add them, or click **All** to select every department again.
 - **Sort**: newest first (by the date an ad was first seen, the default), oldest first, deadline soonest, title, or department.
 - **Jobs by Department**: color-coded donut showing where the openings are concentrated.
 - **Deadlines Timeline**: how many applications close on each date.

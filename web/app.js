@@ -206,42 +206,87 @@ function buildSourceList() {
   const container = $('sourceList');
   container.innerHTML = '';
 
-  sorted.forEach(([source, count]) => {
-    // Keep the user's selection on reload; departments seen for the first time start selected.
-    if (!knownSources.has(source)) {
-      knownSources.add(source);
-      activeSources.add(source);
-    }
-    const chip = document.createElement('div');
-    chip.className = 'source-chip';
-    chip.dataset.source = source;
-    chip.innerHTML = `
-      <span class="source-dot" style="background:${sourceColor(source)}"></span>
-      <span class="source-name">${esc(source)}</span>
-      <span class="source-count">${count}</span>
-    `;
-    chip.addEventListener('click', () => {
-      if (activeSources.size === sorted.length && activeSources.has(source)) {
-        activeSources.clear();
-      } else if (!activeSources.has(source)) {
-        activeSources.add(source);
-      } else {
-        activeSources.delete(source);
-      }
-      updateSourceChips();
-      render();
-    });
-    container.appendChild(chip);
+  // Keep the user's selection on reload. Departments seen for the first time
+  // join the selection only while everything is selected, so a reload never
+  // widens a narrowed filter.
+  const wasAll = [...knownSources].every(s => activeSources.has(s));
+  sorted.forEach(([source]) => {
+    if (knownSources.has(source)) return;
+    knownSources.add(source);
+    if (wasAll) activeSources.add(source);
   });
+  // A narrowed filter whose departments all left the list would show nothing.
+  if (!sorted.some(([s]) => activeSources.has(s))) selectAllSources();
+
+  container.appendChild(sourceChip(null, 'All', allJobs.length));
+  sorted.forEach(([source, count]) => container.appendChild(sourceChip(source, source, count)));
 
   updateSourceChips();
   $('sourcesCount').textContent = sorted.length;
 }
 
-function updateSourceChips() {
-  document.querySelectorAll('.source-chip').forEach(chip => {
-    chip.classList.toggle('active', activeSources.has(chip.dataset.source));
+// One row of the Departments list; `source` is null for the "All" row.
+function sourceChip(source, label, count) {
+  const chip = document.createElement('div');
+  chip.className = source === null ? 'source-chip source-all' : 'source-chip';
+  if (source !== null) chip.dataset.source = source;
+  chip.setAttribute('role', 'button');
+  chip.tabIndex = 0;
+  const dot = source === null
+    ? '<span class="source-dot all"></span>'
+    : `<span class="source-dot" style="background:${sourceColor(source)}"></span>`;
+  chip.innerHTML = `
+    ${dot}
+    <span class="source-name">${esc(label)}</span>
+    <span class="source-count">${count}</span>
+  `;
+  const pick = () => {
+    if (source === null) selectAllSources();
+    else toggleSource(source);
+    updateSourceChips();
+    render();
+  };
+  chip.addEventListener('click', pick);
+  chip.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    pick();
   });
+  return chip;
+}
+
+function allSourcesActive() {
+  return Object.keys(sourceCounts).every(s => activeSources.has(s));
+}
+
+function selectAllSources() {
+  Object.keys(sourceCounts).forEach(s => activeSources.add(s));
+}
+
+// With everything selected, a click narrows the list to that one department.
+// After that, clicks add or remove departments; removing the last one selects
+// everything again rather than showing an empty list.
+function toggleSource(source) {
+  if (allSourcesActive()) {
+    activeSources.clear();
+    activeSources.add(source);
+  } else if (activeSources.has(source)) {
+    activeSources.delete(source);
+    if (!Object.keys(sourceCounts).some(s => activeSources.has(s))) selectAllSources();
+  } else {
+    activeSources.add(source);
+  }
+}
+
+function updateSourceChips() {
+  const all = allSourcesActive();
+  document.querySelectorAll('.source-chip').forEach(chip => {
+    const on = chip.classList.contains('source-all') ? all : !all && activeSources.has(chip.dataset.source);
+    chip.classList.toggle('active', on);
+    chip.setAttribute('aria-pressed', String(on));
+  });
+  const shown = Object.keys(sourceCounts).filter(s => activeSources.has(s)).length;
+  $('sourceFilterCount').textContent = all ? '' : `${shown} of ${Object.keys(sourceCounts).length}`;
 }
 
 function buildFetchChips() {
@@ -1032,7 +1077,7 @@ $('clearFilters').addEventListener('click', () => {
   $('dateFrom').value = '';
   $('dateTo').value = '';
   activeSources.clear();
-  Object.keys(sourceCounts).forEach(s => activeSources.add(s));
+  selectAllSources();
   updateSourceChips();
   activeStatuses.clear();
   activeStatuses.add('Online');
