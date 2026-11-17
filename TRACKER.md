@@ -7,7 +7,6 @@ Status markers: `[ ]` to do, `[~]` in progress, `[x]` done. Put the newest sessi
 ## In progress
 
 - Hosted dashboard: setup and live verification done (2026-11-17). Left for a future session: check that the scheduled run (04:17 UTC, first one due 2026-11-18) starts; see the live verification task.
-- [~] Second security audit of the public code repo (all commits since the 2026-11-16 audit, plus the working tree), and an AGENTS.md rule so every agent checks for leaks before committing or pushing.
 
 ## To do
 
@@ -76,6 +75,9 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Trim private infrastructure details from this tracker (private server name, DNS setup) and add a rule against them to AGENTS.md.
 - [x] In `src/scrape.py`, reject off-domain redirects before following them.
 - [ ] Optional, bigger: run the fetch and build in a separate job without secrets and deploy from a second job, so not even a hostile PDF exploiting PyMuPDF could read the Cloudflare token from runner memory. Needs care: the deploy job must not trust code or config produced by the fetch job.
+- [x] Second audit of the public code repo after the 2026-11-17 agent commits: nothing private found. Added `tools/leak-check.sh` and a "Public repo: nothing private, ever" section in AGENTS.md that requires it before every commit and push. (2026-11-17)
+- [x] Commit `leak-patterns.txt` (extra private strings for the leak check) in the private data repo, so it survives a fresh checkout. (2026-11-17)
+- [ ] Optional: install `tools/leak-check.sh` as a local `pre-push` hook (`.git/hooks/pre-push`), so a push is blocked even if an agent forgets the check. Hooks are not part of the repo, so this is per machine.
 
 ### Recurring
 
@@ -95,6 +97,17 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Workflow: a run that waited in the queue checked out stale data, so its data push failed and it did not deploy. The data checkout now uses the branch. (2026-11-17)
 
 ## Session log
+
+### 2026-11-17 (second security audit, leak check)
+
+- Audited the public code repo again after the agent commits since the 2026-11-16 audit (`2a6429b` to `cb92d66`, 19 commits, two of them not pushed yet) plus the working tree. Searched all 44 commits, every commit message and the working tree for the real board domain, D1 database ID, Access team domain and AUD tag (read from `data/wrangler.toml`), the private server name and DNS details (taken from the pre-rewrite backup bundle), the test account email from `data/annotations.sql`, and local paths; then for generic patterns: tokens, private keys, JWTs, 32-character hex IDs, UUIDs, IP addresses, email addresses. Read every doc, deploy and tracker change since the last audit by hand, and the comments in the new code.
+- Result: nothing private in any public commit. Docs and the tracker use placeholders (`<board>`, `<data repo>`, `board.example.org`); the only hex values are pinned action SHAs; the only emails are placeholders and the owner's student email in README.md (public on purpose). The new icons carry no metadata. The one binary hit (in `docs/images/dashboard.png`, unchanged since June) is 3 random bytes of image data. The new Worker endpoints (review mark, deadline corrections) sit behind the unchanged Access check, use the origin check and parameterized SQL, and show council emails only to logged-in members, like notes. GitHub: code repo public with no releases, Actions runs, issues, pull requests or forks, and only `master`; data repo private. The data repo's history holds no stored secrets (only `secrets.*` references).
+- Low, already public before this session, left as is: the example name for the private data repo in `docs/TECHNICAL.md` is the real repo's name (a private repo name gives no access), and the ntfy topic placeholder in early history (April 2026) contains the local user name.
+- Added `tools/leak-check.sh`: checks unpushed commits, their messages and all uncommitted and untracked changes (or the whole history with `--all`) against the real values in `data/wrangler.toml`, extra private strings in `data/leak-patterns.txt`, and generic patterns. It masks private values as `<private>` in its output and refuses to run (exit 2) without `data/`. Created `data/leak-patterns.txt` locally in the data repo with the strings that are not in `wrangler.toml`.
+- AGENTS.md: new section "Public repo: nothing private, ever" (what never to commit, placeholders, no raw `curl`/`gh` output in the tracker, run the check before every commit and push, what to do if something leaked), plus pointers under Commits, the project map and the checks.
+- Verified: the check passes on the current state; `--all` reports only the README student email; in a scratch clone it caught planted leaks (the domain in upper case, a pasted Access redirect with team domain and AUD, a token, a home path, the server name in a commit message, the database ID in an uncommitted change, an untracked file) and exited 2 without `data/`.
+- At the owner's request: committed the script, the AGENTS.md rule and this tracker update in the code repo and pushed `master`; committed `leak-patterns.txt` in the data repo (after a fast-forward pull of one data commit) and pushed it. The leak check passed before each commit. The parallel session's commits up to `d1bd759` were already on GitHub; `--all` afterwards still reports only the README student email, so they are clean too.
+- Not done: the optional pre-push hook.
 
 ### 2026-11-17 (departments filter, tab icon, auto-fetch note)
 
