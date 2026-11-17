@@ -117,6 +117,24 @@ def mark_seen(conn, hash_, seen_at):
                  (seen_at, 'Online', hash_))
 
 
+def set_deadline(conn, hash_, value, iso):
+    """Store a re-detected deadline (the parsed value; manual overrides stay as they are)."""
+    conn.execute('UPDATE jobs SET application_deadline=?, application_deadline_iso=? WHERE hash=?',
+                 (value, iso, hash_))
+
+
+def first_seen_date(row):
+    """The date an ad was first seen, or None."""
+    try:
+        return datetime.strptime((row['first_seen'] or '')[:10], '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def has_override(row, field):
+    return field in _overrides(row)
+
+
 def mark_offline_missing(conn, seen_hashes):
     """Flip every ad not in seen_hashes to Offline. Returns count flipped."""
     rows = conn.execute("SELECT hash FROM jobs WHERE status='Online'").fetchall()

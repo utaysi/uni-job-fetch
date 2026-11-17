@@ -22,6 +22,7 @@ import re
 import shutil
 import sys
 
+import deadline
 import exporter
 import extract
 import scrape
@@ -44,6 +45,32 @@ def resolve_department(scrape_dept, pdf_text):
         return scrape_dept
     pdf_dept = extract.department_from_pdf(pdf_text)
     return pdf_dept or scrape_dept or ''
+
+
+def recheck_deadlines(conn):
+    """Re-detect the deadline of every stored ad from its PDF box and full text.
+
+    Keeps ads fetched earlier in step with improvements to deadline.py, including
+    dates an older version got wrong (it once took "befristet bis zum ..." for the
+    deadline). Re-reading the boxes takes well under a second for a hundred PDFs.
+    Manual corrections are stored as overrides and are not touched.
+    """
+    changed = 0
+    rows = conn.execute('SELECT hash, pdf_filename, application_deadline, application_deadline_iso, '
+                        'full_text, first_seen FROM jobs').fetchall()
+    for row in rows:
+        box = row['application_deadline'] or ''
+        path = os.path.join(PDF_DIR, row['pdf_filename'] or '')
+        if row['pdf_filename'] and os.path.isfile(path):
+            try:
+                box = extract.read_deadline_box(path)
+            except Exception:
+                pass  # keep the stored value
+        dl = deadline.detect(box, row['full_text'] or '', ref=store.first_seen_date(row))
+        if (dl.value, dl.iso) != (row['application_deadline'] or '', row['application_deadline_iso'] or ''):
+            store.set_deadline(conn, row['hash'], dl.value, dl.iso)
+            changed += 1
+    return changed
 
 
 def cmd_fetch(args):
@@ -105,6 +132,7 @@ def cmd_fetch(args):
         print(f"  [{i}/{len(ads)}] NEW {filename}{flag}")
 
     offline = store.mark_offline_missing(conn, seen_hashes)
+    rechecked = recheck_deadlines(conn)
     conn.commit()
     conn.close()
 
@@ -114,6 +142,8 @@ def cmd_fetch(args):
     print(f'Newly offline:  {offline}')
     if errors:
         print(f'Errors/skipped: {errors}')
+    if rechecked:
+        print(f'Deadlines updated by re-check: {rechecked}')
     print('Done.')
     return 0
 

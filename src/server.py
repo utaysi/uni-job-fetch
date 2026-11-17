@@ -15,7 +15,9 @@ import json
 import os
 import posixpath
 import urllib.parse
+from datetime import timedelta
 
+import deadline
 import store
 
 PORT = 8080
@@ -42,8 +44,30 @@ def jobs_payload(conn):
             item[field] = store.effective(row, field)
         item['emails'] = store.effective(row, 'emails')
         item['phones'] = store.effective(row, 'phones')
+        item.update(deadline_fields(row))
         out.append(item)
     return out
+
+
+def deadline_fields(row):
+    """How the dashboard shows the deadline: kind, date, and the text for the card.
+
+    deadline_kind is one of date, relative, rolling, none, unknown, text (see
+    deadline.py). deadline_iso is the date to count down to; for "relative" it is
+    estimated from the day the ad was first seen.
+    """
+    first_seen = store.first_seen_date(row)
+    dl = deadline.detect(store.effective(row, 'application_deadline'), row['full_text'] or '',
+                         ref=first_seen, trust_box=store.has_override(row, 'application_deadline'))
+    iso = dl.iso
+    if dl.kind == 'relative' and first_seen:
+        iso = (first_seen + timedelta(days=dl.days)).isoformat()
+    return {
+        'application_deadline': dl.value,
+        'deadline_kind': dl.kind,
+        'deadline_iso': iso,
+        'deadline_days': dl.days,
+    }
 
 
 def make_handler(db_path):

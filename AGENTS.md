@@ -16,7 +16,8 @@ Instructions for coding agents working in this repository.
 
 ## Project map
 
-- `src/`: Python CLI (`python src/jobs.py`): scraping, PDF extraction, SQLite store, Excel round-trip, local server, `build-site`.
+- `src/`: Python CLI (`python src/jobs.py`): scraping, PDF extraction, deadline detection (`deadline.py`), SQLite store, Excel round-trip, local server, `build-site`.
+- `tests/`: Python unit tests (standard library `unittest`).
 - `web/`: dashboard page (`index.html`, `app.js`, vendored Chart.js). Runs read-only locally and with notes, tags and the fetch button when hosted.
 - `worker/`: Cloudflare Worker for the hosted dashboard (`src/index.js` entry point, `src/api.js` logic, `migrations/` D1 schema, `test/`).
 - `deploy/`: templates for the private data repo (wrangler config, GitHub workflow, `.gitignore`).
@@ -25,7 +26,7 @@ Instructions for coding agents working in this repository.
 ## Checks before committing
 
 - Worker: `cd worker && npm test`.
-- Python: `.venv/bin/python -m py_compile src/*.py`.
+- Python: `.venv/bin/python -m py_compile src/*.py` and `.venv/bin/python -m unittest discover -s tests`.
 - Dashboard changes: run `python src/jobs.py serve` and check the page, or build with `python src/jobs.py build-site`.
 
 ## Conventions

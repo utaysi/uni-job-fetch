@@ -14,6 +14,8 @@ import re
 
 import fitz
 
+import deadline
+
 # Core labelled box. The standard template prints these in a single row, each
 # value sitting in the column directly beneath its label.
 BOX_LABELS = ['Eintrittstermin', 'Bewerbungsfrist', 'Entgeltgruppe', 'Befristung', 'Umfang']
@@ -116,6 +118,15 @@ def read_box_values(words):
             prev_y = y0
         out[BOX_FIELD[name]] = clean(' '.join(value_parts))
     return out
+
+
+def read_deadline_box(pdf_path):
+    """The raw Bewerbungsfrist value from the labelled box ('' if there is none)."""
+    doc = fitz.open(pdf_path)
+    try:
+        return read_box_values(get_words(doc)).get('application_deadline', '')
+    finally:
+        doc.close()
 
 
 def read_ausschreibungs_id(words, text):
@@ -226,11 +237,6 @@ def regex_fallbacks(text):
         r'nächstmöglich[a-zäöü ]*|fortlaufend|Semesterbeginn)',
         r'\b(ab sofort|zum nächstmöglichen Zeitpunkt)\b',
     ])
-    out['application_deadline'] = _first(text, [
-        r'(?:Bewerbungsfrist|Bewerbungsschluss|Bewerben bis|Bewerbungen bis)'
-        r'\s*[:\-]?\s*([0-9]{1,2}\.[0-9]{1,2}\.[0-9]{2,4})',
-        r'(?:bis spätestens|bis zum)\s*([0-9]{1,2}\.[0-9]{1,2}\.[0-9]{2,4})',
-    ])
     out['pay'] = _first(text, [
         r'\b(SHK-Vergütung)\b',
         r'\b((?:TV[- ]?L|TV[- ]?H|TVöD)(?:\s*[EG]\s?\d{1,2}[a-zA-Z]?)?)',
@@ -292,7 +298,12 @@ def extract(pdf_path):
     fields['template'] = 'standard' if is_standard else 'non-standard'
 
     fields['position_start_date_iso'] = normalize_date(fields['position_start_date'])
-    fields['application_deadline_iso'] = normalize_date(fields['application_deadline'])
+    # The box value is checked against the full text (see deadline.py): a date in
+    # the text beats "2 Wochen" in the box, and an empty box can still be a
+    # standing vacancy ("Dauerausschreibung") or give the date in a sentence.
+    dl = deadline.detect(fields['application_deadline'], text)
+    fields['application_deadline'] = dl.value
+    fields['application_deadline_iso'] = dl.iso
 
     core = ['job_id', 'application_deadline', 'pay', 'workload']
     if is_standard:
