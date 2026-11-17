@@ -66,6 +66,7 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [ ] The main page (`MAIN_URL` in `src/scrape.py`) now redirects to `/de/universitaet/profil/universitaetskultur/karriere/stellenangebote/stud-und-wiss-hilfskraftstellen`, which contains no PDF links, so the main page yields 0 ads (subpages still work). Find where the central ads moved and update `MAIN_URL` and `discover_main_page`. (Found 2026-11-16 during the security fixes; same result with the old fetch code, so not caused by them.)
 - [ ] Two subpages are skipped on every fetch (on 2026-11-16 they redirected to the university login page, on 2026-11-17 they answered 403): University Computing Centre (`/de/hrz/aktuelles/nachrichten/2025/shk-hrz-2025-02`) and Center for Synthetic Microbiology (`/en/synmikro/jobs-1`). Find their current job pages and update `SUBPAGES` in `src/scrape.py`, or remove them. (Found 2026-11-16; this was already failing before the hardening.)
 - [ ] Three PDF links answer 403 on every fetch and count as errors: `fb13-shk-ag-witte-2021.pdf`, `fb13-shk-analyse-messdaten-ag-halbleiter-2026.pdf` (a newer `-1` version downloads fine) and `mediziner-praktikum-ws2223-zwei-stellen-neum.pdf`. Probably removed or protected files that are still linked. Decide whether 403 on a PDF should be a quiet skip instead of an error. (Found 2026-11-17.)
+- [ ] Low priority, future: a failed PDF download (403, timeout, network error) leaves the ad out of the hashes seen on that run, so `mark_offline_missing` in `src/store.py` flips it to Offline, although its link is still listed. A temporary network problem could flip listed ads to Offline until the next fetch. Keep the current status of ads whose link was found but whose download failed. Note the ad is identified by its PDF hash, not its URL, so this needs a link-to-hash mapping (for example store the URL per ad). (Found 2026-11-17; did not cause any wrong Offline so far.)
 
 ### Security hardening (from the 2026-11-16 audit, none blocking)
 
@@ -97,6 +98,13 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Workflow: a run that waited in the queue checked out stale data, so its data push failed and it did not deploy. The data checkout now uses the branch. (2026-11-17)
 
 ## Session log
+
+### 2026-11-17 (why an ad shows Offline)
+
+- Question from the owner: why a card with the ID `fb13-shk-Halbleiterphotonik-WiSe26_27`, first seen 2026-11-16 with 13 days left, shows Offline. The card is a different PDF, `ausschreibungstext-shk-verstaerkerlabor-1.pdf`, whose "Ausschreibungs-ID" copies the ID of `fb13-shk-halbleiterphotonik-wise26_27.pdf` (the second card with that ID, still Online, deadline 2026-11-06). Its deadline is "mind. 2 Wochen", so the 13 days are the estimate (first seen plus 14 days).
+- Offline means the PDF's hash was not among the links found on the latest fetch. Checked the fetch logs: the PDF was found on 2026-11-16 and missing from the first fetch on 2026-11-17 (that run's one "newly offline"), with no download error for it. The live Physics page no longer links it, although the file is still served at its old address with the same hash. So the department removed it from the listing; the Offline status is correct.
+- Added a low-priority Scraper task: failed downloads currently also flip an ad to Offline.
+- No code changes.
 
 ### 2026-11-17 (second security audit, leak check)
 
