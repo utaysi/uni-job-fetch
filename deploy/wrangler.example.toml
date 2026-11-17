@@ -36,3 +36,5 @@ GITHUB_REPO = "<owner>/<data-repo>"
 GITHUB_WORKFLOW = "update.yml"
 GITHUB_REF = "main"
 FETCH_LIMIT = "3"
+# Your login email (comma-separate several): only these see the Members panel with everyone's logins.
+ADMIN_EMAILS = ""

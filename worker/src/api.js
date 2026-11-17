@@ -30,12 +30,18 @@ export function teamIssuer(teamDomain) {
   return d.startsWith('https://') ? d : `https://${d}`;
 }
 
+/**
+ * The verified identity: {email (lowercased), loginAt}, where loginAt is when Access issued
+ * the token (the start of the login session) as an ISO time, or null if the token has no `iat`.
+ */
 export async function verifyAccessToken(token, { issuer, audience, jwks }) {
   const { payload } = await jwtVerify(token, jwks, { issuer, audience, algorithms: ['RS256'] });
   if (typeof payload.email !== 'string' || !payload.email) return null;
-  return payload.email.toLowerCase();
+  const loginAt = Number.isFinite(payload.iat) ? new Date(payload.iat * 1000).toISOString() : null;
+  return { email: payload.email.toLowerCase(), loginAt };
 }
 
+/** The verified identity of a request (see verifyAccessToken), or null: then refuse it. */
 export async function authenticate(request, env) {
   // Fail closed: without full configuration nobody gets in.
   if (!env.TEAM_DOMAIN || !env.POLICY_AUD) return null;
@@ -131,13 +137,56 @@ async function countWrite({ env, email, now }) {
 const writeLimitReached = () =>
   fail(429, `Daily limit of ${WRITE_CAP} changes per person reached. It resets at midnight (Berlin time).`);
 
+// ---------- Identity and logins ----------
+
+export const LOGIN_HISTORY_DAYS = 90;
+const LOGIN_HISTORY_MAX = 500;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** True if `email` is listed in ADMIN_EMAILS (comma-separated). Unset means nobody is admin. */
+export function isAdmin(env, email) {
+  return String(env.ADMIN_EMAILS || '').split(',')
+    .map(s => s.trim().toLowerCase()).filter(Boolean)
+    .includes(email);
+}
+
+/** Who is logged in. The page asks once per load, so this also records the visit for the Members panel. */
+async function getMe({ env, email, loginAt, now }) {
+  if (loginAt) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO logins (email, login_at, last_seen_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT (email, login_at) DO UPDATE SET last_seen_at = MAX(last_seen_at, excluded.last_seen_at)`,
+      ).bind(email, loginAt, now.toISOString()).run();
+    } catch (err) {
+      // Recording is a side job: the dashboard must still load if it fails.
+      console.error('Could not record login', err && err.message);
+    }
+  }
+  return json({ email, admin: isAdmin(env, email) });
+}
+
+/** Logins per member and the recent sessions; only for ADMIN_EMAILS. */
+async function getLogins({ env, email, now }) {
+  if (!isAdmin(env, email)) return fail(403, 'Only the board owner can see logins.');
+  const since = new Date(now.getTime() - LOGIN_HISTORY_DAYS * DAY_MS).toISOString();
+  const [members, recent] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT email, COUNT(*) AS logins, MIN(login_at) AS first_login, MAX(login_at) AS last_login,
+              MAX(last_seen_at) AS last_seen
+       FROM logins GROUP BY email ORDER BY last_seen DESC, email`,
+    ),
+    env.DB.prepare(
+      `SELECT email, login_at, last_seen_at FROM logins WHERE login_at >= ?
+       ORDER BY login_at DESC, email LIMIT ${LOGIN_HISTORY_MAX}`,
+    ).bind(since),
+  ]);
+  return json({ members: members.results, recent: recent.results, history_days: LOGIN_HISTORY_DAYS });
+}
+
 // ---------- Notes and tags ----------
 
 const NOTE_COLUMNS = 'id, job_hash, author, text, created_at, updated_at';
-
-async function getMe({ email }) {
-  return json({ email });
-}
 
 const REVIEW_COLUMNS = 'job_hash, needs_review, set_by, set_at';
 const DEADLINE_COLUMNS = 'job_hash, kind, deadline, set_by, set_at';
@@ -387,6 +436,7 @@ async function startFetch({ env, email, now }) {
 
 const ROUTES = [
   ['GET', /^\/api\/me$/, getMe],
+  ['GET', /^\/api\/logins$/, getLogins],
   ['GET', /^\/api\/annotations$/, getAnnotations],
   ['POST', /^\/api\/jobs\/([0-9a-f]{16})\/notes$/, addNote],
   ['PATCH', /^\/api\/notes\/([1-9][0-9]{0,14})$/, editNote],
@@ -400,8 +450,9 @@ const ROUTES = [
   ['POST', /^\/api\/fetch$/, startFetch],
 ];
 
-/** Handles an authenticated /api/ request. `email` is the verified Access identity. */
-export async function handleApi(request, env, email, now = new Date()) {
+/** Handles an authenticated /api/ request. `user` is the verified Access identity from authenticate(). */
+export async function handleApi(request, env, user, now = new Date()) {
+  const { email, loginAt } = user;
   const url = new URL(request.url);
   let pathMatched = false;
   for (const [method, pattern, handler] of ROUTES) {
@@ -419,7 +470,7 @@ export async function handleApi(request, env, email, now = new Date()) {
       body = await readJson(request);
       if (body instanceof Response) return body;
     }
-    return handler({ env, email, now, params: match.slice(1), body });
+    return handler({ env, email, loginAt, now, params: match.slice(1), body });
   }
   return pathMatched ? fail(405, 'Method not allowed.') : fail(404, 'Not found.');
 }
