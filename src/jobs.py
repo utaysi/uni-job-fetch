@@ -74,6 +74,9 @@ def recheck_deadlines(conn):
 
 
 def cmd_fetch(args):
+    # Print each line as it happens, also when output goes to a pipe (GitHub Actions),
+    # so the run log shows when each page and PDF was fetched.
+    sys.stdout.reconfigure(line_buffering=True)
     conn = store.connect()
     os.makedirs(PDF_DIR, exist_ok=True)
 
