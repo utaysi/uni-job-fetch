@@ -669,6 +669,35 @@ body {
 
 .tag-remove:hover { color: var(--red); }
 
+/* Needs review mark in the opened card */
+.review-chip {
+  background: rgba(243, 156, 18, 0.12);
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.review-add {
+  padding: 0.1rem 0.55rem;
+  background: none;
+  border: 1px dashed var(--orange);
+  border-radius: 99px;
+  color: var(--orange);
+  font-family: inherit;
+  font-size: 0.6875rem;
+  cursor: pointer;
+}
+
+.review-add:hover { background: rgba(243, 156, 18, 0.12); }
+.review-add:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.review-by {
+  margin-top: 0.3rem;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.details-block h4.spaced { margin-top: 1rem; }
+
 .job-details {
   grid-column: 1 / -1;
   border-top: 1px solid var(--border);

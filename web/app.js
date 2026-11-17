@@ -43,6 +43,8 @@ let me = null;
 let notesByJob = new Map();
 let tagsById = new Map();
 let tagIdsByJob = new Map();
+// Council decisions on the "needs review" mark; they override the parser's flag.
+let reviewByJob = new Map();
 const expanded = new Set();
 const editingNotes = new Set();
 
@@ -150,6 +152,11 @@ function deadlineView(j) {
   }
   if (raw) return { text: raw, title: raw };
   return { text: 'No deadline', open: true, title: 'The ad does not give an application deadline.' };
+}
+
+function needsReview(j) {
+  const flag = reviewByJob.get(j.hash);
+  return flag ? Boolean(flag.needs_review) : Boolean(j.needs_review);
 }
 
 function sourceColor(source) {
@@ -326,7 +333,7 @@ function updateTagSuggestions() {
 }
 
 function jobMatchesStatus(j) {
-  if (activeStatuses.has('Needs Review') && j.needs_review) return true;
+  if (activeStatuses.has('Needs Review') && needsReview(j)) return true;
   if (activeStatuses.has('Online') && j.status === 'Online') return true;
   if (activeStatuses.has('Offline') && j.status === 'Offline') return true;
   return false;
@@ -406,13 +413,27 @@ function noteHtml(n) {
     </li>`;
 }
 
+// The review mark as a removable chip, or a button to set it, plus who changed it last.
+function reviewHtml(j) {
+  const flag = reviewByJob.get(j.hash);
+  const control = needsReview(j)
+    ? `<span class="tag-chip review-chip">&#9888; Needs review<button type="button" class="tag-remove" data-action="clear-review" aria-label="Remove the needs review mark">&times;</button></span>`
+    : '<button type="button" class="review-add" data-action="set-review">&#9888; Mark for review</button>';
+  const who = flag
+    ? `<div class="review-by">${flag.needs_review ? 'Marked' : 'Cleared'} by <span title="${esc(flag.set_by)}">${esc(displayName(flag.set_by))}</span>, ${esc(formatInstant(flag.set_at))}</div>`
+    : '';
+  return `<div class="job-tags">${control}</div>${who}`;
+}
+
 function detailsHtml(j) {
   const notes = notesByJob.get(j.hash) || [];
   const tagIds = tagIdsByJob.get(j.hash) || [];
   return `
     <div class="job-details">
       <section class="details-block">
-        <h4>Tags</h4>
+        <h4>Review</h4>
+        ${reviewHtml(j)}
+        <h4 class="spaced">Tags</h4>
         <div class="job-tags">${tagIds.map(id => tagChip(id, true)).join('') || '<span class="muted">No tags yet</span>'}</div>
         <form class="inline-form" data-action="add-tag">
           <input name="tag" list="tagSuggestions" maxlength="30" placeholder="New or existing tag" autocomplete="off" required>
@@ -441,7 +462,7 @@ function cardHtml(j, i, animate) {
   const notesBadge = me && noteCount
     ? `<span class="note-badge" title="${notesWord}" aria-label="${notesWord}">${NOTE_ICON}${noteCount}</span>`
     : '';
-  const review = j.needs_review ? '<span style="color:var(--orange)">&#9888; review</span>' : '';
+  const review = needsReview(j) ? '<span style="color:var(--orange)">&#9888; review</span>' : '';
   const offline = j.status === 'Offline' ? '<span style="color:var(--text-muted)">offline</span>' : '';
   const pdf = j.pdf ? encodeURI(j.pdf) : '';
   const seen = j.first_seen ? formatDate(j.first_seen) : '-';
@@ -656,6 +677,7 @@ async function loadAnnotations() {
   notesByJob = new Map();
   tagsById = new Map();
   tagIdsByJob = new Map();
+  reviewByJob = new Map((data.review_flags || []).map(r => [r.job_hash, r]));
   (data.tags || []).forEach(t => tagsById.set(t.id, t));
   (data.notes || []).forEach(n => {
     if (!notesByJob.has(n.job_hash)) notesByJob.set(n.job_hash, []);
@@ -705,6 +727,13 @@ function setupHostedHandlers() {
     if (action && action.tagName === 'BUTTON') {
       const noteId = action.closest('.note')?.dataset.noteId;
       switch (action.dataset.action) {
+        case 'set-review':
+        case 'clear-review':
+          runAction(action, async () => {
+            await api('PUT', `api/jobs/${hash}/review`, { needs_review: action.dataset.action === 'set-review' });
+            await afterChange(hash);
+          });
+          return;
         case 'remove-tag':
           runAction(action, async () => {
             await api('DELETE', `api/jobs/${hash}/tags/${action.dataset.tagId}`);

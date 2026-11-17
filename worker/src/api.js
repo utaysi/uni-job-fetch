@@ -1,4 +1,4 @@
-// Logic for the hosted dashboard Worker: Access token checks, the notes/tags/fetch API,
+// Logic for the hosted dashboard Worker: Access token checks, the notes/tags/review/fetch API,
 // and security headers. The entry point is index.js; see there for configuration.
 
 import { createRemoteJWKSet, jwtVerify } from 'jose';
@@ -139,13 +139,18 @@ async function getMe({ email }) {
   return json({ email });
 }
 
+const REVIEW_COLUMNS = 'job_hash, needs_review, set_by, set_at';
+
 async function getAnnotations({ env }) {
-  const [notes, tags, jobTags] = await env.DB.batch([
+  const [notes, tags, jobTags, reviewFlags] = await env.DB.batch([
     env.DB.prepare(`SELECT ${NOTE_COLUMNS} FROM notes ORDER BY created_at, id`),
     env.DB.prepare('SELECT id, name FROM tags ORDER BY name_key'),
     env.DB.prepare('SELECT job_hash, tag_id FROM job_tags'),
+    env.DB.prepare(`SELECT ${REVIEW_COLUMNS} FROM review_flags`),
   ]);
-  return json({ notes: notes.results, tags: tags.results, job_tags: jobTags.results });
+  return json({
+    notes: notes.results, tags: tags.results, job_tags: jobTags.results, review_flags: reviewFlags.results,
+  });
 }
 
 async function addNote(ctx) {
@@ -225,6 +230,21 @@ async function removeTag(ctx) {
     ).bind(Number(tagId)),
   ]);
   return json({ ok: true });
+}
+
+// ---------- Needs review mark ----------
+
+/** Sets or clears the mark for one ad; anyone on the council may change it. */
+async function setReview(ctx) {
+  const { env, email, now, params: [hash], body } = ctx;
+  if (typeof body.needs_review !== 'boolean') return fail(400, 'needs_review must be true or false.');
+  if (!(await countWrite(ctx))) return writeLimitReached();
+  const review = await env.DB.prepare(
+    `INSERT INTO review_flags (job_hash, needs_review, set_by, set_at) VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT (job_hash) DO UPDATE SET needs_review = ?2, set_by = ?3, set_at = ?4
+     RETURNING ${REVIEW_COLUMNS}`,
+  ).bind(hash, body.needs_review ? 1 : 0, email, now.toISOString()).first();
+  return json({ review });
 }
 
 // ---------- Fetch button ----------
@@ -335,6 +355,7 @@ const ROUTES = [
   ['DELETE', /^\/api\/notes\/([1-9][0-9]{0,14})$/, deleteNote],
   ['POST', /^\/api\/jobs\/([0-9a-f]{16})\/tags$/, addTag],
   ['DELETE', /^\/api\/jobs\/([0-9a-f]{16})\/tags\/([1-9][0-9]{0,14})$/, removeTag],
+  ['PUT', /^\/api\/jobs\/([0-9a-f]{16})\/review$/, setReview],
   ['GET', /^\/api\/fetch-status$/, getFetchStatus],
   ['POST', /^\/api\/fetch$/, startFetch],
 ];
@@ -354,7 +375,7 @@ export async function handleApi(request, env, email, now = new Date()) {
       if (request.headers.get('Origin') !== url.origin) return fail(403, 'Cross-site request rejected.');
     }
     let body = null;
-    if (method === 'POST' || method === 'PATCH') {
+    if (method === 'POST' || method === 'PATCH' || method === 'PUT') {
       body = await readJson(request);
       if (body instanceof Response) return body;
     }

@@ -4,7 +4,7 @@
 
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { SignJWT, generateKeyPair, exportJWK, createLocalJWKSet } from 'jose';
 import {
@@ -12,7 +12,10 @@ import {
 } from '../src/api.js';
 import worker from '../src/index.js';
 
-const SCHEMA = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8');
+// All migrations in order, as `wrangler d1 migrations apply` runs them.
+const MIGRATIONS = new URL('../migrations/', import.meta.url);
+const SCHEMA = readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).sort()
+  .map(f => readFileSync(new URL(f, MIGRATIONS), 'utf8')).join('\n');
 const ORIGIN = 'https://board.example.org';
 const HASH = '0123456789abcdef';
 const HASH2 = 'fedcba9876543210';
@@ -192,6 +195,43 @@ test('tags: removing from the last ad deletes the tag', async () => {
   a = await annotations();
   assert.equal(a.tags.length, 0);
   assert.equal(a.job_tags.length, 0);
+});
+
+// ---------- Needs review mark ----------
+
+test('review: set and clear, last change wins and records who made it', async () => {
+  assert.deepEqual((await annotations()).review_flags, []);
+  const set = await call('PUT', `/api/jobs/${HASH}/review`, { needs_review: true });
+  assert.equal(set.status, 200);
+  assert.deepEqual(set.data.review, {
+    job_hash: HASH, needs_review: 1, set_by: ALICE, set_at: '2026-11-16T10:00:00.000Z',
+  });
+  const later = new Date('2026-11-16T11:00:00Z');
+  const cleared = await call('PUT', `/api/jobs/${HASH}/review`, { needs_review: false }, BOB, {}, later);
+  assert.equal(cleared.status, 200);
+  await call('PUT', `/api/jobs/${HASH2}/review`, { needs_review: false });
+  const flags = (await annotations()).review_flags.sort((a, b) => a.job_hash.localeCompare(b.job_hash));
+  assert.deepEqual(flags, [
+    { job_hash: HASH, needs_review: 0, set_by: BOB, set_at: '2026-11-16T11:00:00.000Z' },
+    { job_hash: HASH2, needs_review: 0, set_by: ALICE, set_at: '2026-11-16T10:00:00.000Z' },
+  ]);
+});
+
+test('review: validation, origin check and allowed methods', async () => {
+  for (const value of [undefined, 1, 'true', null]) {
+    assert.equal((await call('PUT', `/api/jobs/${HASH}/review`, { needs_review: value })).status, 400);
+  }
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/review`, { needs_review: true }, ALICE, { origin: 'https://evil.example' })).status, 403);
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/review`, 'needs_review=1', ALICE, { contentType: 'text/plain' })).status, 415);
+  assert.equal((await call('POST', `/api/jobs/${HASH}/review`, { needs_review: true })).status, 405);
+  assert.equal((await call('PUT', '/api/jobs/NOTAHASH/review', { needs_review: true })).status, 404);
+  assert.deepEqual((await annotations()).review_flags, []);
+});
+
+test('review: counts towards the daily write cap', async () => {
+  const now = new Date('2026-11-16T10:00:00Z');
+  env.DB.db.prepare('INSERT INTO write_counts (email, day, n) VALUES (?, ?, ?)').run(ALICE, berlinDay(now), WRITE_CAP);
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/review`, { needs_review: true })).status, 429);
 });
 
 // ---------- Write cap ----------

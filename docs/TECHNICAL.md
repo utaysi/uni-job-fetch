@@ -10,7 +10,7 @@ src/      Python modules (run with `py src/jobs.py`)
 web/      dashboard page (index.html, app.js, vendored Chart.js)
 data/     jobs.db, pdfs/, wheels/, backup/ (all generated or vendored; for hosting, a private git repo)
 tests/    Python unit tests (deadline detection)
-worker/   Cloudflare Worker for the hosted dashboard (login check, notes/tags API, fetch button)
+worker/   Cloudflare Worker for the hosted dashboard (login check, notes/tags/review API, fetch button)
 deploy/   templates for the private data repo (wrangler config, workflow, .gitignore)
 docs/     these notes
 job_ads.xlsx   Excel export, kept at the project root
@@ -99,20 +99,21 @@ The dashboard can be hosted at an address like `board.example.org`, so that staf
 The hosted version adds features the local dashboard does not have:
 
 - **Notes** on each ad, signed with the author's name and time. Everyone can add notes; only the author can edit or delete their own. Ads with notes show a note icon with the number of notes next to the title.
+- **Needs review** mark: anyone can set it on an ad or remove it, from the opened ad. This overrides the mark the parser (or the Excel round-trip) set, and the ad shows who changed it last.
 - **Tags** on each ad: type a new one or pick an existing one, then filter the list by tag, or pick "No tags" to see only ads nobody has tagged yet. Selected tag filters combine with "or". A tag disappears once it is removed from every ad.
 - **Last fetched**: when the job list was last updated.
 - **Fetch now**: starts an extra fetch. All council members share 3 per day, which reset at midnight Berlin time.
 
-Clicking an ad on the hosted dashboard opens its notes and tags. The PDF button opens the ad itself.
+Clicking an ad on the hosted dashboard opens its review mark, tags and notes. The PDF button opens the ad itself.
 
 ### What lives where
 
 | Place | Contents |
 | --- | --- |
 | Public code repo (this one) | Code only: scraper, dashboard, Worker, database schema, deployment templates. No data, secrets, domain or login settings. |
-| Private data repo | `jobs.db`, `pdfs/`, a daily `annotations.sql` backup of notes and tags, `wrangler.toml` (domain and login settings), and the workflow that fetches and deploys. |
+| Private data repo | `jobs.db`, `pdfs/`, a daily `annotations.sql` backup of notes, tags and review marks, `wrangler.toml` (domain and login settings), and the workflow that fetches and deploys. |
 | GitHub Actions | Runs the workflow on temporary machines: once a day, and when someone presses Fetch now. |
-| Cloudflare | Serves the dashboard and PDFs, enforces the login (Cloudflare Access), runs the Worker, and stores notes and tags (D1 database). |
+| Cloudflare | Serves the dashboard and PDFs, enforces the login (Cloudflare Access), runs the Worker, and stores notes, tags and review marks (D1 database). |
 
 ### How it is secured
 
