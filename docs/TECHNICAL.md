@@ -104,6 +104,7 @@ The hosted version adds features the local dashboard does not have:
 - **Tags** on each ad: type a new one or pick an existing one, then filter the list by tag, or pick "No tags" to see only ads nobody has tagged yet. Selected tag filters combine with "or". A tag disappears once it is removed from every ad.
 - **Last fetched**: when the job list was last updated. Next to it, "Auto-fetch every 24 h" is a reminder that the board fetches by itself once a day, early in the morning (the cron in the data repo's workflow); its tooltip says so.
 - **Fetch now**: starts an extra fetch. All council members share 3 per day, which reset at midnight Berlin time. The daily automatic fetch does not count toward this limit.
+- **Members** (owner only): a panel at the bottom of the sidebar lists who has logged in and when. It shows only for the emails in `ADMIN_EMAILS` (see "Seeing who logged in" below).
 
 Clicking an ad on the hosted dashboard opens its deadline, review mark, tags and notes. The PDF button opens the ad itself.
 
@@ -112,9 +113,9 @@ Clicking an ad on the hosted dashboard opens its deadline, review mark, tags and
 | Place | Contents |
 | --- | --- |
 | Public code repo (this one) | Code only: scraper, dashboard, Worker, database schema, deployment templates. No data, secrets, domain or login settings. |
-| Private data repo | `jobs.db`, `pdfs/`, a daily `annotations.sql` backup of notes, tags, review marks and deadline corrections, `wrangler.toml` (domain and login settings), and the workflow that fetches and deploys. |
+| Private data repo | `jobs.db`, `pdfs/`, a daily `annotations.sql` backup of notes, tags, review marks, deadline corrections and logins, `wrangler.toml` (domain, login and admin settings), and the workflow that fetches and deploys. |
 | GitHub Actions | Runs the workflow on temporary machines: once a day, and when someone presses Fetch now. |
-| Cloudflare | Serves the dashboard and PDFs, enforces the login (Cloudflare Access), runs the Worker, and stores notes, tags, review marks and deadline corrections (D1 database). |
+| Cloudflare | Serves the dashboard and PDFs, enforces the login (Cloudflare Access), runs the Worker, and stores notes, tags, review marks, deadline corrections and logins (D1 database). |
 
 ### How it is secured
 
@@ -124,6 +125,7 @@ Clicking an ad on the hosted dashboard opens its deadline, review mark, tags and
 - **Safe writes.** Changes must come from the dashboard itself (Origin check) as JSON, and all database queries use bound parameters. Notes are limited to 2,000 characters and tags to 30. Each person can make up to 300 changes a day.
 - **No script injection.** Everything from the ads or from users is escaped before it is shown, and a strict Content Security Policy only allows the dashboard's own scripts. The page loads nothing from other websites.
 - **Narrow fetcher.** The scraper only downloads `https` links on `uni-marburg.de`, checks every redirect before following it, caps every download (5 MB per page, 25 MB per PDF), and runs on a temporary GitHub machine.
+- **Login list for the owner only.** The Worker answers `/api/logins` only for emails listed in `ADMIN_EMAILS`; everyone else gets 403, whatever the page shows. Without the setting nobody can read it.
 - **Small secrets.** The Fetch now button uses a GitHub token that can only start and view workflow runs in the data repo. It cannot read or change code or data.
 - **Secrets only where needed.** In the daily workflow, the Cloudflare token is passed only to the three `wrangler` steps, not to the steps that install packages or read downloaded PDFs. Python packages are installed from `requirements.lock` with pinned hashes, so a newly published (possibly malicious) package version never runs next to the secrets.
 
@@ -222,10 +224,11 @@ You need a Cloudflare account that manages your domain, a GitHub account, and No
   ```
 
   If the push is rejected because the daily run committed in between, run `git fetch && git reset --hard origin/main` in `data/`, run `import-excel` again with the same file, then commit and push. Your corrections are in the Excel file, so nothing is lost.
+- **Seeing who logged in:** set `ADMIN_EMAILS` in `data/wrangler.toml` to your login email (lowercase; separate several with commas), commit, push, and run the workflow. After the next page load, the Members panel at the bottom of the sidebar lists everyone who has opened the board: when each was last seen, and per member the number of logins and the sessions of the last 90 days. A session starts when Cloudflare Access issues a login token (after entering the emailed code, or silently while the Access login is still valid) and lasts until it expires; the page records each load within it. Members who never opened the board, and visits before this feature was deployed, are not listed. Cloudflare Zero Trust also keeps its own Access login log, including refused attempts, but only for a short time on the Free plan.
 - **Restoring notes and tags:** Cloudflare keeps 7 days of history (`npx wrangler d1 time-travel restore DB --timestamp=<ISO time> -c ../data/wrangler.toml` from `worker/`). For older states, every daily run saves `annotations.sql` in the data repo, so its git history holds a snapshot of each day.
 - **Renewing the GitHub token:** create a new fine-grained token as in step 8 and run `wrangler secret put GITHUB_TOKEN` again.
 - **If a scheduled run fails** (for example the university site is down), GitHub emails you. The next run tries again; data is only committed and deployed after a successful fetch.
 
 ### Testing the Worker
 
-`cd worker && npm test` runs the API tests (notes, tags, permissions, limits, login token checks) against an in-memory database. They need no Cloudflare account.
+`cd worker && npm test` runs the API tests (notes, tags, permissions, limits, login token checks, login records) against an in-memory database. They need no Cloudflare account.
