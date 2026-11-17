@@ -18,7 +18,7 @@ Instructions for coding agents working in this repository.
 
 - `src/`: Python CLI (`python src/jobs.py`): scraping, PDF extraction, deadline detection (`deadline.py`), SQLite store, Excel round-trip, local server, `build-site`.
 - `tests/`: Python unit tests (standard library `unittest`).
-- `web/`: dashboard page (`index.html`, `app.js`, vendored Chart.js). Runs read-only locally and with notes, tags, the review mark and the fetch button when hosted.
+- `web/`: dashboard page (`index.html`, `app.js`, vendored Chart.js). Runs read-only locally and with notes, tags, the review mark, deadline corrections and the fetch button when hosted.
 - `worker/`: Cloudflare Worker for the hosted dashboard (`src/index.js` entry point, `src/api.js` logic, `migrations/` D1 schema, `test/`).
 - `deploy/`: templates for the private data repo (wrangler config, GitHub workflow, `.gitignore`).
 - `docs/TECHNICAL.md`: how everything works, including hosting setup and day-to-day operations.

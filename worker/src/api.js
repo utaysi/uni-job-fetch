@@ -1,4 +1,4 @@
-// Logic for the hosted dashboard Worker: Access token checks, the notes/tags/review/fetch API,
+// Logic for the hosted dashboard Worker: Access token checks, the notes/tags/review/deadline/fetch API,
 // and security headers. The entry point is index.js; see there for configuration.
 
 import { createRemoteJWKSet, jwtVerify } from 'jose';
@@ -140,16 +140,19 @@ async function getMe({ email }) {
 }
 
 const REVIEW_COLUMNS = 'job_hash, needs_review, set_by, set_at';
+const DEADLINE_COLUMNS = 'job_hash, kind, deadline, set_by, set_at';
 
 async function getAnnotations({ env }) {
-  const [notes, tags, jobTags, reviewFlags] = await env.DB.batch([
+  const [notes, tags, jobTags, reviewFlags, deadlines] = await env.DB.batch([
     env.DB.prepare(`SELECT ${NOTE_COLUMNS} FROM notes ORDER BY created_at, id`),
     env.DB.prepare('SELECT id, name FROM tags ORDER BY name_key'),
     env.DB.prepare('SELECT job_hash, tag_id FROM job_tags'),
     env.DB.prepare(`SELECT ${REVIEW_COLUMNS} FROM review_flags`),
+    env.DB.prepare(`SELECT ${DEADLINE_COLUMNS} FROM deadline_overrides`),
   ]);
   return json({
     notes: notes.results, tags: tags.results, job_tags: jobTags.results, review_flags: reviewFlags.results,
+    deadlines: deadlines.results,
   });
 }
 
@@ -245,6 +248,41 @@ async function setReview(ctx) {
      RETURNING ${REVIEW_COLUMNS}`,
   ).bind(hash, body.needs_review ? 1 : 0, email, now.toISOString()).first();
   return json({ review });
+}
+
+// ---------- Deadline corrections ----------
+
+/** {kind: 'none'} or {kind: 'date', date: 'YYYY-MM-DD'} (a real date, 2000 to 2100); null otherwise. */
+export function cleanDeadline(body) {
+  if (body.kind === 'none') return { kind: 'none', deadline: null };
+  if (body.kind !== 'date' || typeof body.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(body.date)) return null;
+  const d = new Date(`${body.date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== body.date) return null;
+  const year = d.getUTCFullYear();
+  if (year < 2000 || year > 2100) return null;
+  return { kind: 'date', deadline: body.date };
+}
+
+/** Replaces the detected deadline of one ad; anyone on the council may change it. */
+async function setDeadline(ctx) {
+  const { env, email, now, params: [hash], body } = ctx;
+  const value = cleanDeadline(body);
+  if (!value) return fail(400, 'Choose a valid date (years 2000 to 2100) or "No deadline".');
+  if (!(await countWrite(ctx))) return writeLimitReached();
+  const deadline = await env.DB.prepare(
+    `INSERT INTO deadline_overrides (job_hash, kind, deadline, set_by, set_at) VALUES (?1, ?2, ?3, ?4, ?5)
+     ON CONFLICT (job_hash) DO UPDATE SET kind = ?2, deadline = ?3, set_by = ?4, set_at = ?5
+     RETURNING ${DEADLINE_COLUMNS}`,
+  ).bind(hash, value.kind, value.deadline, email, now.toISOString()).first();
+  return json({ deadline });
+}
+
+/** Goes back to the deadline detected from the ad. */
+async function resetDeadline(ctx) {
+  const { env, params: [hash] } = ctx;
+  if (!(await countWrite(ctx))) return writeLimitReached();
+  await env.DB.prepare('DELETE FROM deadline_overrides WHERE job_hash = ?').bind(hash).run();
+  return json({ ok: true });
 }
 
 // ---------- Fetch button ----------
@@ -356,6 +394,8 @@ const ROUTES = [
   ['POST', /^\/api\/jobs\/([0-9a-f]{16})\/tags$/, addTag],
   ['DELETE', /^\/api\/jobs\/([0-9a-f]{16})\/tags\/([1-9][0-9]{0,14})$/, removeTag],
   ['PUT', /^\/api\/jobs\/([0-9a-f]{16})\/review$/, setReview],
+  ['PUT', /^\/api\/jobs\/([0-9a-f]{16})\/deadline$/, setDeadline],
+  ['DELETE', /^\/api\/jobs\/([0-9a-f]{16})\/deadline$/, resetDeadline],
   ['GET', /^\/api\/fetch-status$/, getFetchStatus],
   ['POST', /^\/api\/fetch$/, startFetch],
 ];

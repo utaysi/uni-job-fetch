@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { SignJWT, generateKeyPair, exportJWK, createLocalJWKSet } from 'jose';
 import {
-  handleApi, verifyAccessToken, berlinDay, cleanTag, cleanNote, secure, WRITE_CAP,
+  handleApi, verifyAccessToken, berlinDay, cleanTag, cleanNote, cleanDeadline, secure, WRITE_CAP,
 } from '../src/api.js';
 import worker from '../src/index.js';
 
@@ -232,6 +232,53 @@ test('review: counts towards the daily write cap', async () => {
   const now = new Date('2026-11-16T10:00:00Z');
   env.DB.db.prepare('INSERT INTO write_counts (email, day, n) VALUES (?, ?, ?)').run(ALICE, berlinDay(now), WRITE_CAP);
   assert.equal((await call('PUT', `/api/jobs/${HASH}/review`, { needs_review: true })).status, 429);
+});
+
+// ---------- Deadline corrections ----------
+
+test('deadline: set a date, change it to none, reset to detected', async () => {
+  assert.deepEqual((await annotations()).deadlines, []);
+  const set = await call('PUT', `/api/jobs/${HASH}/deadline`, { kind: 'date', date: '2026-12-01' });
+  assert.equal(set.status, 200);
+  assert.deepEqual(set.data.deadline, {
+    job_hash: HASH, kind: 'date', deadline: '2026-12-01', set_by: ALICE, set_at: '2026-11-16T10:00:00.000Z',
+  });
+  const later = new Date('2026-11-16T11:00:00Z');
+  const none = await call('PUT', `/api/jobs/${HASH}/deadline`, { kind: 'none', date: '2026-12-01' }, BOB, {}, later);
+  assert.deepEqual(none.data.deadline, {
+    job_hash: HASH, kind: 'none', deadline: null, set_by: BOB, set_at: '2026-11-16T11:00:00.000Z',
+  });
+  await call('PUT', `/api/jobs/${HASH2}/deadline`, { kind: 'date', date: '2027-01-15' });
+  assert.equal((await annotations()).deadlines.length, 2);
+  assert.equal((await call('DELETE', `/api/jobs/${HASH}/deadline`)).status, 200);
+  assert.deepEqual((await annotations()).deadlines.map(d => d.job_hash), [HASH2]);
+  // Resetting an ad without a correction is fine too.
+  assert.equal((await call('DELETE', `/api/jobs/${HASH}/deadline`)).status, 200);
+});
+
+test('deadline: validation, origin check and write cap', async () => {
+  const bad = [
+    {}, { kind: 'date' }, { kind: 'date', date: '2026-02-30' }, { kind: 'date', date: '2026-2-3' },
+    { kind: 'date', date: '1999-12-31' }, { kind: 'date', date: '2101-01-01' }, { kind: 'date', date: 20261201 },
+    { kind: 'date', date: '2026-12-01T00:00' }, { kind: 'rolling' }, { kind: 'none ' },
+  ];
+  for (const body of bad) {
+    assert.equal((await call('PUT', `/api/jobs/${HASH}/deadline`, body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/deadline`, { kind: 'none' }, ALICE, { origin: 'https://evil.example' })).status, 403);
+  assert.equal((await call('DELETE', `/api/jobs/${HASH}/deadline`, undefined, ALICE, { origin: null })).status, 403);
+  assert.equal((await call('POST', `/api/jobs/${HASH}/deadline`, { kind: 'none' })).status, 405);
+  assert.deepEqual((await annotations()).deadlines, []);
+  const now = new Date('2026-11-16T10:00:00Z');
+  env.DB.db.prepare('INSERT INTO write_counts (email, day, n) VALUES (?, ?, ?)').run(ALICE, berlinDay(now), WRITE_CAP);
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/deadline`, { kind: 'none' })).status, 429);
+  assert.equal((await call('DELETE', `/api/jobs/${HASH}/deadline`)).status, 429);
+});
+
+test('cleanDeadline', () => {
+  assert.deepEqual(cleanDeadline({ kind: 'none' }), { kind: 'none', deadline: null });
+  assert.deepEqual(cleanDeadline({ kind: 'date', date: '2028-02-29' }), { kind: 'date', deadline: '2028-02-29' });
+  assert.equal(cleanDeadline({ kind: 'date', date: '2027-02-29' }), null);
 });
 
 // ---------- Write cap ----------

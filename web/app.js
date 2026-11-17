@@ -45,6 +45,8 @@ let tagsById = new Map();
 let tagIdsByJob = new Map();
 // Council decisions on the "needs review" mark; they override the parser's flag.
 let reviewByJob = new Map();
+// Deadlines corrected by council members; they replace the detected deadline.
+let deadlineEdits = new Map();
 const expanded = new Set();
 const editingNotes = new Set();
 
@@ -109,10 +111,17 @@ function startOfToday() {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-// The deadline as a Date, or null. The server reads it (src/deadline.py) and
-// sends deadline_iso; data from before that only has the text.
-function deadlineDate(j) {
+// The deadline detected from the ad, as a Date or null. The server reads it
+// (src/deadline.py) and sends deadline_iso; data from before that only has the text.
+function detectedDate(j) {
   return parseDate(j.deadline_kind ? j.deadline_iso : j.application_deadline);
+}
+
+// The deadline to work with: a council member's correction if there is one.
+function deadlineDate(j) {
+  const edit = deadlineEdits.get(j.hash);
+  if (edit) return edit.kind === 'date' ? parseDate(edit.deadline) : null;
+  return detectedDate(j);
 }
 
 // Whole days until the deadline. The deadline day itself is 0 and still open.
@@ -127,11 +136,11 @@ function deadlineStatus(d) {
   return { text: `${days}d left`, cls: days <= 7 ? 'deadline-soon' : 'deadline-future' };
 }
 
-// What the Deadline line shows: a date or a word, a countdown, and a tooltip
-// with what the ad actually says.
-function deadlineView(j) {
+// What the Deadline line shows for the detected deadline: a date or a word, a
+// countdown, and a tooltip with what the ad actually says.
+function detectedView(j) {
   const raw = j.application_deadline || '';
-  const d = deadlineDate(j);
+  const d = detectedDate(j);
   const kind = j.deadline_kind || (d ? 'date' : raw ? 'text' : 'none');
   if ((kind === 'date' || kind === 'relative') && d) {
     const relative = kind === 'relative';
@@ -152,6 +161,16 @@ function deadlineView(j) {
   }
   if (raw) return { text: raw, title: raw };
   return { text: 'No deadline', open: true, title: 'The ad does not give an application deadline.' };
+}
+
+// The Deadline line, with a council member's correction taking the place of the detected value.
+function deadlineView(j) {
+  const edit = deadlineEdits.get(j.hash);
+  if (!edit) return detectedView(j);
+  const title = `Set by ${displayName(edit.set_by)}, ${formatInstant(edit.set_at)}. Detected from the ad: ${detectedView(j).text}.`;
+  const d = edit.kind === 'date' ? parseDate(edit.deadline) : null;
+  if (d) return { text: formatDate(edit.deadline), status: deadlineStatus(d), title, edited: true };
+  return { text: 'No deadline', open: true, title, edited: true };
 }
 
 function needsReview(j) {
@@ -304,7 +323,7 @@ function byFirstSeen(a, b) {
 function deadlineKey(j) {
   const d = deadlineDate(j);
   if (d) return daysLeft(d) < 0 ? [1, -d.getTime()] : [0, d.getTime()];
-  return [j.deadline_kind === 'unknown' ? 3 : 2, 0];
+  return [j.deadline_kind === 'unknown' && !deadlineEdits.has(j.hash) ? 3 : 2, 0];
 }
 
 function sortJobs(jobs) {
@@ -425,13 +444,36 @@ function reviewHtml(j) {
   return `<div class="job-tags">${control}</div>${who}`;
 }
 
+// Correct the deadline: pick a date or "No deadline", or go back to the detected one.
+function deadlineEditHtml(j) {
+  const edit = deadlineEdits.get(j.hash);
+  const detected = detectedView(j).text;
+  // Quote the ad where the detection is not simply a date (a period, "laufend", ...).
+  const said = j.application_deadline && j.deadline_kind !== 'date' ? ` (the ad says "${j.application_deadline}")` : '';
+  const current = edit ? (edit.deadline || '') : (j.deadline_kind === 'date' ? j.deadline_iso || '' : '');
+  const who = edit
+    ? `<div class="review-by">${edit.kind === 'date' ? 'Date' : '"No deadline"'} set by <span title="${esc(edit.set_by)}">${esc(displayName(edit.set_by))}</span>, ${esc(formatInstant(edit.set_at))}.
+         <button class="link-btn" type="button" data-action="deadline-reset">Use detected</button></div>`
+    : '';
+  return `
+    <div class="detected">Detected: ${esc(detected)}${esc(said)}</div>
+    <form class="inline-form deadline-form" data-action="set-deadline">
+      <input type="date" name="date" value="${esc(current)}" min="2000-01-01" max="2100-12-31" required aria-label="Deadline">
+      <button class="action-btn small" type="submit">Save</button>
+      <button class="link-btn" type="button" data-action="deadline-none">No deadline</button>
+    </form>
+    ${who}`;
+}
+
 function detailsHtml(j) {
   const notes = notesByJob.get(j.hash) || [];
   const tagIds = tagIdsByJob.get(j.hash) || [];
   return `
     <div class="job-details">
       <section class="details-block">
-        <h4>Review</h4>
+        <h4>Deadline</h4>
+        ${deadlineEditHtml(j)}
+        <h4 class="spaced">Review</h4>
         ${reviewHtml(j)}
         <h4 class="spaced">Tags</h4>
         <div class="job-tags">${tagIds.map(id => tagChip(id, true)).join('') || '<span class="muted">No tags yet</span>'}</div>
@@ -483,7 +525,7 @@ function cardHtml(j, i, animate) {
         ${!isOpen && tagIds.length ? `<div class="job-tags">${tagIds.map(id => tagChip(id, false)).join('')}</div>` : ''}
       </div>
       <div class="job-dates">
-        <span class="date-label">Deadline</span>
+        <span class="date-label"${dl.edited ? ' title="Corrected on the dashboard"' : ''}>Deadline${dl.edited ? ' &#9998;' : ''}</span>
         <span class="deadline-date${dl.status ? '' : ' wide'}${dl.open ? ' open' : ''}" title="${esc(dl.title)}">${esc(dl.text)}</span>
         ${dl.status ? `<span class="deadline-status ${dl.status.cls}">${esc(dl.status.text)}</span>` : ''}
         <span class="date-label">First seen</span>
@@ -678,6 +720,7 @@ async function loadAnnotations() {
   tagsById = new Map();
   tagIdsByJob = new Map();
   reviewByJob = new Map((data.review_flags || []).map(r => [r.job_hash, r]));
+  deadlineEdits = new Map((data.deadlines || []).map(d => [d.job_hash, d]));
   (data.tags || []).forEach(t => tagsById.set(t.id, t));
   (data.notes || []).forEach(n => {
     if (!notesByJob.has(n.job_hash)) notesByJob.set(n.job_hash, []);
@@ -727,6 +770,18 @@ function setupHostedHandlers() {
     if (action && action.tagName === 'BUTTON') {
       const noteId = action.closest('.note')?.dataset.noteId;
       switch (action.dataset.action) {
+        case 'deadline-none':
+          runAction(action, async () => {
+            await api('PUT', `api/jobs/${hash}/deadline`, { kind: 'none' });
+            await afterChange(hash);
+          });
+          return;
+        case 'deadline-reset':
+          runAction(action, async () => {
+            await api('DELETE', `api/jobs/${hash}/deadline`);
+            await afterChange(hash);
+          });
+          return;
         case 'set-review':
         case 'clear-review':
           runAction(action, async () => {
@@ -774,6 +829,15 @@ function setupHostedHandlers() {
     const button = form.querySelector('button[type="submit"]');
 
     switch (form.dataset.action) {
+      case 'set-deadline': {
+        const date = form.elements.date.value;
+        if (!date) return;
+        runAction(button, async () => {
+          await api('PUT', `api/jobs/${hash}/deadline`, { kind: 'date', date });
+          await afterChange(hash);
+        });
+        return;
+      }
       case 'add-tag': {
         const name = form.elements.tag.value.trim();
         if (!name) return;

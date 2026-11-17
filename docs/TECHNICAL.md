@@ -10,7 +10,7 @@ src/      Python modules (run with `py src/jobs.py`)
 web/      dashboard page (index.html, app.js, vendored Chart.js)
 data/     jobs.db, pdfs/, wheels/, backup/ (all generated or vendored; for hosting, a private git repo)
 tests/    Python unit tests (deadline detection)
-worker/   Cloudflare Worker for the hosted dashboard (login check, notes/tags/review API, fetch button)
+worker/   Cloudflare Worker for the hosted dashboard (login check, notes/tags/review/deadline API, fetch button)
 deploy/   templates for the private data repo (wrangler config, workflow, .gitignore)
 docs/     these notes
 job_ads.xlsx   Excel export, kept at the project root
@@ -45,7 +45,7 @@ folder so the PDF links (which point at `data/pdfs/`) keep working.
 - **No deadline**: either the ad says applications are taken any time ("laufend", "jederzeit", "Dauerausschreibung", "in den kommenden Wochen", "immer wieder ... gesucht"), or it gives no deadline at all. Hover over "No deadline" on the dashboard to see which.
 - **Unknown**: the PDF is a scanned image without text, so nothing can be read. Open the PDF to check.
 
-Every fetch re-reads the box of every stored PDF and runs the detection again, so improvements reach older ads too (this takes well under a second). A deadline corrected in Excel is kept as you wrote it. The tests in `tests/test_deadline.py` cover each kind of ad that was misread before; run them with `.venv/bin/python -m unittest discover -s tests`.
+Every fetch re-reads the box of every stored PDF and runs the detection again, so improvements reach older ads too (this takes well under a second). A deadline corrected in Excel is kept as you wrote it. On the hosted dashboard, a deadline corrected by a council member takes the place of both. The tests in `tests/test_deadline.py` cover each kind of ad that was misread before; run them with `.venv/bin/python -m unittest discover -s tests`.
 
 ## Installing dependencies (online vs offline)
 
@@ -99,21 +99,22 @@ The dashboard can be hosted at an address like `board.example.org`, so that staf
 The hosted version adds features the local dashboard does not have:
 
 - **Notes** on each ad, signed with the author's name and time. Everyone can add notes; only the author can edit or delete their own. Ads with notes show a note icon with the number of notes next to the title.
+- **Deadline corrections**: in the opened ad, anyone can set the deadline to another date or to "No deadline", and go back to the detected one with "Use detected". A corrected deadline shows a pencil next to "Deadline" on the card, and its tooltip says who set it and what was detected.
 - **Needs review** mark: anyone can set it on an ad or remove it, from the opened ad. This overrides the mark the parser (or the Excel round-trip) set, and the ad shows who changed it last.
 - **Tags** on each ad: type a new one or pick an existing one, then filter the list by tag, or pick "No tags" to see only ads nobody has tagged yet. Selected tag filters combine with "or". A tag disappears once it is removed from every ad.
 - **Last fetched**: when the job list was last updated.
 - **Fetch now**: starts an extra fetch. All council members share 3 per day, which reset at midnight Berlin time.
 
-Clicking an ad on the hosted dashboard opens its review mark, tags and notes. The PDF button opens the ad itself.
+Clicking an ad on the hosted dashboard opens its deadline, review mark, tags and notes. The PDF button opens the ad itself.
 
 ### What lives where
 
 | Place | Contents |
 | --- | --- |
 | Public code repo (this one) | Code only: scraper, dashboard, Worker, database schema, deployment templates. No data, secrets, domain or login settings. |
-| Private data repo | `jobs.db`, `pdfs/`, a daily `annotations.sql` backup of notes, tags and review marks, `wrangler.toml` (domain and login settings), and the workflow that fetches and deploys. |
+| Private data repo | `jobs.db`, `pdfs/`, a daily `annotations.sql` backup of notes, tags, review marks and deadline corrections, `wrangler.toml` (domain and login settings), and the workflow that fetches and deploys. |
 | GitHub Actions | Runs the workflow on temporary machines: once a day, and when someone presses Fetch now. |
-| Cloudflare | Serves the dashboard and PDFs, enforces the login (Cloudflare Access), runs the Worker, and stores notes, tags and review marks (D1 database). |
+| Cloudflare | Serves the dashboard and PDFs, enforces the login (Cloudflare Access), runs the Worker, and stores notes, tags, review marks and deadline corrections (D1 database). |
 
 ### How it is secured
 
