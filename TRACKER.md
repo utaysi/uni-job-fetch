@@ -6,8 +6,7 @@ Status markers: `[ ]` to do, `[~]` in progress, `[x]` done. Put the newest sessi
 
 ## In progress
 
-- Hosted dashboard live verification (setup steps 1 to 10 finished on 2026-11-17).
-- Daily run moved to 04:17 UTC; the data repo copy still needs to be committed and pushed, then check on 2026-11-18 that the scheduled run starts.
+- Hosted dashboard: setup and live verification done (2026-11-17). Left for a future session: check that the scheduled run (04:17 UTC, first one due 2026-11-18) starts; see the live verification task.
 
 ## To do
 
@@ -28,13 +27,15 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 
 ### Hosted dashboard: live verification (after setup)
 
-- [~] `curl -I` on the board address redirects to the Access login; the `workers.dev` address does not serve the app. Board address checked 2026-11-17: `/`, `/api/jobs.json` and `/api/fetch-status` all answer 302 to the Access login. `workers.dev` still to check.
-- [~] An allowlisted email receives a code and sees jobs, PDFs, "Last fetched", notes and tags; a non-allowlisted email gets no code. Jobs and PDFs confirmed by the owner (2026-11-17); "Last fetched", notes, tags and the non-allowlisted email still to check.
-- [ ] With two accounts: authors show correctly, each can only edit their own notes, tags are shared and the tag filter works.
-- [~] Fetch now counts down 3, 2, 1, 0, refuses a fourth, and stays disabled while a run is in progress. One click checked (2026-11-17): the run started on GitHub and passed, and the counter showed 2/3. The limit and the disabled state during a run are still to check.
-- [~] The daily scheduled run did not start on 2026-11-17: the data repo has no `schedule` run at all, although the workflow is active and the cron is on `main`. GitHub warns that scheduled runs at the start of an hour can be dropped under load. Moved the cron from `0 5 * * *` to `17 4 * * *` (an hour earlier, off the full hour) in `deploy/update.yml` and the data repo copy (2026-11-17). Still to do: commit and push the data repo copy, then check on 2026-11-18 after about 06:30 Berlin time that a "Scheduled fetch" run appears (`gh run list -R <data repo> --event schedule`).
-- [ ] Browser devtools show no requests to third-party hosts.
-- [ ] Check the Cloudflare menu names in the setup docs against the real dashboard and correct them if needed.
+- [x] `curl -I` on the board address redirects to the Access login; the `workers.dev` address does not serve the app. Board address checked 2026-11-17: `/`, `/api/jobs.json` and `/api/fetch-status` all answer 302 to the Access login. Owner confirmed in the Worker settings that only the custom domain is listed and workers.dev and preview URLs are disabled.
+- [x] An allowlisted email receives a code and sees jobs, PDFs, "Last fetched", notes and tags; a non-allowlisted email gets no code. Confirmed by the owner (2026-11-17).
+- [x] With two accounts: authors show correctly, each can only edit their own notes, tags are shared and the tag filter works. Confirmed by the owner (2026-11-17).
+- [x] Fetch now counts down 3, 2, 1, 0, refuses a fourth, and stays disabled while a run is in progress. Owner checked (2026-11-17): every click started a run that passed, the counter reached 0/3 and the button stayed disabled. The server-side refusal of a fourth (429) is covered by the Worker tests.
+- [~] The daily scheduled run did not start on 2026-11-17: the data repo has no `schedule` run at all, although the workflow is active and the cron is on `main`. GitHub warns that scheduled runs at the start of an hour can be dropped under load. The cron moved from `0 5 * * *` to `17 4 * * *` (an hour earlier, off the full hour), committed and pushed in both repos on 2026-11-17 (still no scheduled runs at 14:34 that day, as expected). To check in a future session: a "Scheduled fetch" run appears from 2026-11-18 on (`gh run list -R <data repo> --event schedule`). If not, look at GitHub's schedule docs and the repo's Actions settings.
+- [x] Browser devtools show no requests to third-party hosts. Confirmed by the owner (2026-11-17).
+- [x] Firefox console on the board showed two errors (2026-11-17): a CSP block of an inline script from `index.js:9263:27`, and "Content at <board> may not load or link to file:///". The served page has no inline script, no `index.js` and no `file:` link. The owner confirmed both disappear in a private window (extensions off), so they come from a browser extension. The CSP block is the policy working.
+- [x] Devtools show "Source map error: request failed with status 404" for `chart.umd.js.map`, because the vendored `web/vendor/chart-4.4.7.umd.js` ends with a `sourceMappingURL` comment and the map file is not vendored. Harmless (only devtools ask for it); left as is by the owner's decision (2026-11-17).
+- [x] Check the Cloudflare menu names in the setup docs against the real dashboard and correct them if needed. Step 7, step 8 and "Adding or removing council members" in `docs/TECHNICAL.md` rewritten from what the owner found during setup (2026-11-17).
 
 ### Dashboard
 
@@ -129,7 +130,12 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - Found: no scheduled run on 2026-11-17 (`gh run list --event schedule` is empty). Added a task to check tomorrow and move the cron off the full hour if needed.
 - Owner confirmed the dashboard after the fetch (counter 2/3, "Last fetched", new ads) and pulled the data repo. Step 9 skipped (test notes). Step 10: plain link on the personal website works; `/board` redirect skipped.
 - At the owner's request, moved the daily run to `17 4 * * *` (an hour earlier, and off the full hour) in both workflow copies; checked that both files are identical and the YAML parses.
-- Not verified: `workers.dev` address, the new schedule (needs the data repo push and tomorrow's run), the rest of the live verification.
+- Live verification, confirmed by the owner: only the custom domain (workers.dev and previews disabled), notes, tags, a non-allowlisted email gets no code, two-account ownership and shared tags, and no third-party requests in devtools. Two Firefox console errors (inline script CSP block from `index.js`, `file:///` link) traced to something outside the page: the served HTML and scripts contain neither (see the live verification task).
+- Owner confirmed the Fetch now limit (0/3, button disabled) and that the console errors are gone in a private window (an extension). One more devtools message: a 404 for Chart.js's source map (harmless, optional task added).
+- Docs: rewrote setup steps 7 and 8 and the council members line in `docs/TECHNICAL.md` with the real Cloudflare and GitHub menu names, and how to read the team domain and AUD tag from the login redirect.
+- The cron change was committed and pushed in both repos (in the parallel dashboard session).
+- Owner checked the parallel session's newest features on the live board: review mark, deadlines and deadline corrections. Source map 404 closed as not worth fixing.
+- Not verified: the new schedule (first run due 2026-11-18; owner checks in a future session).
 
 ### 2026-11-16 (hosting setup, part 2)
 
