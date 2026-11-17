@@ -948,12 +948,13 @@ async function refreshFetchStatus() {
     fetchPollTimer = setTimeout(refreshFetchStatus, FETCH_POLL_MS * 3);
     return;
   }
-  if (!st || !st.enabled) {
-    $('fetchCtl').hidden = true;
-    return;
-  }
+  // Without the GitHub token the button and counter stay hidden; the note
+  // about the daily automatic fetch stays, since that runs either way.
+  const enabled = Boolean(st && st.enabled);
+  $('fetchBtn').hidden = !enabled;
+  $('fetchLeft').hidden = !enabled;
+  if (!enabled) return;
   const left = Math.max(0, st.limit - st.used);
-  $('fetchCtl').hidden = false;
   $('fetchLeft').textContent = `${left}/${st.limit} left today`;
   $('fetchBtn').disabled = st.running || left === 0;
   $('fetchBtn').textContent = st.running ? 'Fetching...' : 'Fetch now';
@@ -1023,6 +1024,7 @@ async function detectHosted() {
   buildTagPanel();
   updateTagSuggestions();
   setupHostedHandlers();
+  $('fetchCtl').hidden = false;
   $('fetchBtn').addEventListener('click', startFetch);
   refreshFetchStatus();
 }

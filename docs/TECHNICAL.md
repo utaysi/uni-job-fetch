@@ -102,8 +102,8 @@ The hosted version adds features the local dashboard does not have:
 - **Deadline corrections**: in the opened ad, anyone can set the deadline to another date or to "No deadline", and go back to the detected one with "Use detected". A corrected deadline shows a pencil next to "Deadline" on the card, and its tooltip says who set it and what was detected.
 - **Needs review** mark: anyone can set it on an ad or remove it, from the opened ad. This overrides the mark the parser (or the Excel round-trip) set, and the ad shows who changed it last.
 - **Tags** on each ad: type a new one or pick an existing one, then filter the list by tag, or pick "No tags" to see only ads nobody has tagged yet. Selected tag filters combine with "or". A tag disappears once it is removed from every ad.
-- **Last fetched**: when the job list was last updated.
-- **Fetch now**: starts an extra fetch. All council members share 3 per day, which reset at midnight Berlin time.
+- **Last fetched**: when the job list was last updated. Next to it, "Auto-fetch every 24 h" is a reminder that the board fetches by itself once a day, early in the morning (the cron in the data repo's workflow); its tooltip says so.
+- **Fetch now**: starts an extra fetch. All council members share 3 per day, which reset at midnight Berlin time. The daily automatic fetch does not count toward this limit.
 
 Clicking an ad on the hosted dashboard opens its deadline, review mark, tags and notes. The PDF button opens the ad itself.
 

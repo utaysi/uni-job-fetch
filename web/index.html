@@ -609,11 +609,30 @@ body {
   gap: 0.5rem;
 }
 
+.fetch-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
 .fetch-left {
   font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
 }
+
+/* Small note that a fetch also runs by itself every day. */
+.fetch-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.6875rem;
+  color: var(--cyan);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.fetch-auto svg { width: 11px; height: 11px; flex-shrink: 0; }
 
 .action-btn {
   padding: 0.45rem 0.875rem;
@@ -869,8 +888,14 @@ body {
       </div>
     </div>
     <div class="fetch-ctl" id="fetchCtl" hidden>
-      <button class="action-btn" id="fetchBtn" type="button">Fetch now</button>
-      <span class="fetch-left" id="fetchLeft"></span>
+      <button class="action-btn" id="fetchBtn" type="button" hidden>Fetch now</button>
+      <div class="fetch-info">
+        <span class="fetch-left" id="fetchLeft" hidden></span>
+        <span class="fetch-auto" title="The board also fetches new ads by itself once a day, early in the morning (Berlin time). These automatic fetches do not count toward the daily Fetch now limit.">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>
+          Auto-fetch every 24 h
+        </span>
+      </div>
     </div>
   </div>
 </header>
