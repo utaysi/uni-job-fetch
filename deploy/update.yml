@@ -12,7 +12,8 @@ run-name: ${{ inputs.source == 'dashboard' && 'Dashboard fetch' || (github.event
 
 on:
   schedule:
-    - cron: '0 5 * * *'  # 05:00 UTC, about 06:00 or 07:00 in Berlin. GitHub may start it a bit later.
+    # Off the full hour on purpose: GitHub may drop scheduled runs that start on the hour when busy.
+    - cron: '17 4 * * *'  # 04:17 UTC, about 05:17 or 06:17 in Berlin. GitHub may start it a bit later.
   workflow_dispatch:
     inputs:
       source:
