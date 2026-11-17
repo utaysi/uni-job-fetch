@@ -40,8 +40,14 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 
 - [x] Show "First seen" under the deadline in each card, sort the list by first seen (newest first) by default, add sort options in the sidebar, and add a "No tags" filter. (2026-11-17)
 - [ ] Check the new date column, sort options and "No tags" filter on the hosted dashboard with real tags. Deployed 2026-11-17 (code `e53ed65`); not yet looked at while logged in.
-- [ ] 12 of 89 deadlines are not read as dates, so they show as plain text, get no countdown and sort last under "Deadline soonest": German month names (`07. Juli 2026`, `30. Juni 2026`) and free text (`mind. 2 Wochen`). The parser leaves `application_deadline_iso` empty for them too. Teach the parser (and `parseDate` in `web/app.js`) German month names, or send the ISO date to the page. (Found 2026-11-17.)
-- [ ] On the deadline day itself the card already says "Expired", because the deadline counts from midnight at the start of that day. Decide whether the deadline day should still count as open (`deadlineStatus` and the deadline sort in `web/app.js`). (Found 2026-11-17.)
+- [x] Deadlines with German month names (`07. Juli 2026`) and free text (`mind. 2 Wochen`) are read; see the deadline detection task below. (2026-11-17)
+- [x] The deadline day itself counts as open and shows "Today"; "Expired" starts the day after. (2026-11-17)
+- [x] Notes are easy to spot: a note icon with the number of notes next to the title replaces the small "1 note" text. (2026-11-17)
+- [x] Deadline detection: analyzed all 39 ads (of 116) whose deadline was missing or unreadable and moved detection into `src/deadline.py` with unit tests. Every ad now gets a date, a period after posting (shown as an estimate), "No deadline" (rolling or not stated) or "Unknown" (scanned PDF). Every fetch re-checks all stored ads. (2026-11-17)
+- [x] Needs review mark: anyone on the council can set or clear it in the opened ad (D1 table `review_flags`, `PUT /api/jobs/<hash>/review`); it overrides the parser's flag and shows who changed it last. (2026-11-17)
+- [ ] After the next deploy, check on the live board: note badges, the review mark (set and clear, with two accounts if possible), and a few deadlines (the `elo-hilfskraft_26_11_2` ad should say 25 Nov 2026, the physics "Dauerausschreibung" ads "No deadline"). The deploy run's fetch log should say "Deadlines updated by re-check: 23" or close to it.
+- [ ] One ad (`ausschreibung-praktikumsstelle`, a poster) is a scanned image with no text layer, so it shows "Unknown". It gives no deadline (checked by eye). Optional: OCR scanned PDFs with Tesseract (needs `tesseract-ocr` and `tesseract-ocr-deu` installed in the workflow, and the German language pack locally).
+- [ ] Job-ID extraction picks up wrong text on several ads, for example `in`, `bitte ausfüllen`, `in einer PDF-Datei an` and IDs with `Umfang: 11h/Monat` appended. Analyze like the deadlines. (Found 2026-11-17.)
 
 ### Docs
 
@@ -79,6 +85,16 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Deployment templates in `deploy/` and hosting docs in `docs/TECHNICAL.md`. (2026-11-16)
 
 ## Session log
+
+### 2026-11-17 (deadlines, notes badge, review mark)
+
+- Deadline analysis: 39 of 116 ads had an empty or unreadable deadline. Causes: German month names in the box (5 ads); "laufend" or "jederzeit" in the box (3); "mind. 2 Wochen" or "2 Wochen" in the box while the text gives the real date (2) or only the period (1); the box reader taking the wrong line (1, the date was beside the label); an empty box with the date only in the application sentence ("bis 15.09.2026", without "zum") (1); physics standing vacancies whose box labels have no text layer ("Dauerausschreibung") (4); "jederzeit", "immer wieder ... gesucht", "in den kommenden Wochen" or "fortlaufend" in the text (4 more, overlapping); no deadline in the ad at all (18, mostly external internships; checked each for missed dates: only seminar dates, letter dates and work periods); one scanned PDF without text.
+- Also found: one ad had a wrong stored date. The old fallback regex took "befristet bis zum 31.05.2027" (contract end) instead of "bis zum 25.11.2026". The new detection skips contract periods and date ranges.
+- Built `src/deadline.py` (kinds: date, relative, rolling, none, unknown, text for manual corrections), used by the extractor, by a re-check of every stored ad at each fetch (re-reads each PDF's box: 0.5 s for 116 PDFs) and by the dashboard data (`deadline_kind`, `deadline_iso`, `deadline_days`). 35 unit tests in `tests/test_deadline.py`.
+- Dashboard: deadline line shows the date, "~date" for an estimate, "No deadline" or "Unknown", with a tooltip quoting the ad; the deadline day shows "Today"; the deadline sort, range filter and timeline use the detected date. Note icon with count next to the title. Review section in the opened ad (hosted only) with a removable "Needs review" chip or a "Mark for review" button and who changed it last.
+- Worker: migration `0002_review_flags.sql`, `PUT /api/jobs/<hash>/review` (boolean, origin check, daily write cap), flags included in `/api/annotations`. Tests now load all migrations; 25 pass.
+- Verified: full re-extraction of all 116 PDFs changes no previously correct date (only the wrong one above); the re-check on a copy of `jobs.db` updates 23 ads and a second run changes none; browser tests (Playwright, mock API on the re-checked copy) for badges, every deadline kind, "Today" with the clock set to 25 Nov 2026, the deadline sort, setting and clearing the review mark, local read-only mode, no sideways scroll at 375px; real `jobs.py serve` under the Worker CSP shows no errors. The local `data/jobs.db` was not changed.
+- Not verified: the live board (not deployed yet); the migration on the real D1 database.
 
 ### 2026-11-17 (dashboard: first seen, sorting, "No tags")
 
