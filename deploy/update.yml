@@ -47,6 +47,9 @@ jobs:
       - name: Check out data (this repo)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The branch, not the commit the run was started from: a run that waited in the
+          # queue would otherwise miss the data the previous run pushed, and its push fails.
+          ref: ${{ github.ref }}
           path: code/data
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
