@@ -54,6 +54,7 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Tab icon: a purple briefcase with a smiling face (`web/favicon.svg`, plus `favicon-32.png` and `apple-touch-icon.png`) instead of the browser's empty placeholder. (2026-11-17)
 - [x] Show that the board fetches automatically every 24 hours: "Auto-fetch every 24 h" under the Fetch now counter, with a tooltip; shown on the hosted board only. (2026-11-17)
 - [ ] On the live board: the Departments "All" row and single-select, the tab icon (also in Safari if anyone uses it), and the auto-fetch note.
+- [x] Sidebar order: Departments, Tags, Sort by, Status, Deadline range (with "Clear filters" now at the bottom). (2026-11-17)
 - [ ] One ad (`ausschreibung-praktikumsstelle`, a poster) is a scanned image with no text layer, so it shows "Unknown". It gives no deadline (checked by eye). Optional: OCR scanned PDFs with Tesseract (needs `tesseract-ocr` and `tesseract-ocr-deu` installed in the workflow, and the German language pack locally).
 - [ ] Job-ID extraction picks up wrong text on several ads, for example `in`, `bitte ausfüllen`, `in einer PDF-Datei an` and IDs with `Umfang: 11h/Monat` appended. Analyze like the deadlines. (Found 2026-11-17.)
 
@@ -105,6 +106,7 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - Verified: headless Chromium against a mock of the hosted API (Worker CSP added to the page) in three modes (hosted with fetch, hosted without token, local): every Departments click sequence above, keyboard, "Clear filters", card counts match the API data for each selection, the three icons answer 200 with the right types, the fetch controls show or hide as described, no horizontal scroll at 375px and 800px, no page errors or CSP violations. Icons checked by eye at 16, 32 and 180px. Real `jobs.py serve` serves the icons; `build-site` output contains them. Worker tests (28), Python tests (35) and `py_compile` pass.
 - Pushed `master` (`08eacbe`) and deployed with a manual run of the data repo workflow, at the owner's request. The run passed in 5m43s: it checked out `08eacbe`, uploaded 6 changed files including the three icons, and the fetch found 74 ads still online and 0 newly offline. Afterwards `/`, `/favicon.svg`, `/app.js` and `/api/jobs.json` all answer 302 to the Access login.
 - Not verified: the new features on the live board while logged in, and the icon in Safari.
+- Later, at the owner's request: reordered the sidebar to Departments, Tags, Sort by, Status, Deadline range. Checked in headless Chromium (hosted and local: panel order, "Clear filters", no sideways scroll at 375px, no errors). Committed and pushed; not deployed, so it goes live with the next run (daily or Fetch now).
 
 ### 2026-11-17 (deadline corrections, deploys)
 
