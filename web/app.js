@@ -98,14 +98,58 @@ function displayName(email) {
   return String(email || '').split('@')[0] || email;
 }
 
-function deadlineStatus(dateStr) {
-  if (!dateStr) return { text: 'No deadline', cls: '' };
-  const d = parseDate(dateStr);
-  if (!d) return { text: '', cls: '' };
-  const diff = (d - new Date()) / (1000 * 60 * 60 * 24);
-  if (diff < 0) return { text: 'Expired', cls: 'deadline-past' };
-  if (diff <= 7) return { text: `${Math.ceil(diff)}d left`, cls: 'deadline-soon' };
-  return { text: `${Math.ceil(diff)}d left`, cls: 'deadline-future' };
+// ---------- Deadlines ----------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function startOfToday() {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+// The deadline as a Date, or null. The server reads it (src/deadline.py) and
+// sends deadline_iso; data from before that only has the text.
+function deadlineDate(j) {
+  return parseDate(j.deadline_kind ? j.deadline_iso : j.application_deadline);
+}
+
+// Whole days until the deadline. The deadline day itself is 0 and still open.
+function daysLeft(d) {
+  return Math.round((d - startOfToday()) / DAY_MS);
+}
+
+function deadlineStatus(d) {
+  const days = daysLeft(d);
+  if (days < 0) return { text: 'Expired', cls: 'deadline-past' };
+  if (days === 0) return { text: 'Today', cls: 'deadline-soon' };
+  return { text: `${days}d left`, cls: days <= 7 ? 'deadline-soon' : 'deadline-future' };
+}
+
+// What the Deadline line shows: a date or a word, a countdown, and a tooltip
+// with what the ad actually says.
+function deadlineView(j) {
+  const raw = j.application_deadline || '';
+  const d = deadlineDate(j);
+  const kind = j.deadline_kind || (d ? 'date' : raw ? 'text' : 'none');
+  if ((kind === 'date' || kind === 'relative') && d) {
+    const relative = kind === 'relative';
+    return {
+      text: (relative ? '~' : '') + formatDate(j.deadline_iso || raw),
+      status: deadlineStatus(d),
+      title: relative
+        ? `The ad gives no date, only "${raw}" after it was posted. Estimated as ${j.deadline_days} days after the day it was first seen.`
+        : `The ad says: ${raw}`,
+    };
+  }
+  if (kind === 'rolling') {
+    return { text: 'No deadline', open: true, title: `Applications are accepted at any time. The ad says: ${raw}` };
+  }
+  if (kind === 'unknown') {
+    return { text: 'Unknown', open: true,
+      title: 'This PDF is a scanned image without text, so the deadline could not be read. Open the PDF to check.' };
+  }
+  if (raw) return { text: raw, title: raw };
+  return { text: 'No deadline', open: true, title: 'The ad does not give an application deadline.' };
 }
 
 function sourceColor(source) {
@@ -247,23 +291,22 @@ function byFirstSeen(a, b) {
     || serverOrder.get(a.hash) - serverOrder.get(b.hash);
 }
 
-// Upcoming deadlines first (soonest first), then expired ones (most recent
-// first), then ads without a date we can read. Uses the same cut-off as the
-// "Expired" label so the order matches what the cards say.
-function deadlineKey(j, now) {
-  const d = parseDate(j.application_deadline);
-  if (!d) return [2, 0];
-  return d < now ? [1, -d.getTime()] : [0, d.getTime()];
+// Upcoming deadlines first (soonest first, estimates included), then expired
+// ones (most recent first), then ads without a deadline, then unreadable ones.
+// Uses the same cut-off as the "Expired" label so the order matches the cards.
+function deadlineKey(j) {
+  const d = deadlineDate(j);
+  if (d) return daysLeft(d) < 0 ? [1, -d.getTime()] : [0, d.getTime()];
+  return [j.deadline_kind === 'unknown' ? 3 : 2, 0];
 }
 
 function sortJobs(jobs) {
   const text = (a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' });
-  const now = new Date();
   const compare = {
     newest: byFirstSeen,
     oldest: (a, b) => byFirstSeen(b, a),
     deadline: (a, b) => {
-      const ka = deadlineKey(a, now), kb = deadlineKey(b, now);
+      const ka = deadlineKey(a), kb = deadlineKey(b);
       return ka[0] - kb[0] || ka[1] - kb[1] || byFirstSeen(a, b);
     },
     title: (a, b) => text(jobTitle(a), jobTitle(b)) || byFirstSeen(a, b),
@@ -313,12 +356,12 @@ function getFilteredJobs() {
     }
 
     if (dateFrom) {
-      const d = parseDate(j.application_deadline);
-      if (!d || d < new Date(dateFrom)) return false;
+      const d = deadlineDate(j);
+      if (!d || d < parseDate(dateFrom)) return false;
     }
     if (dateTo) {
-      const d = parseDate(j.application_deadline);
-      if (!d || d > new Date(dateTo + 'T23:59:59')) return false;
+      const d = deadlineDate(j);
+      if (!d || d > parseDate(dateTo)) return false;
     }
 
     return true;
@@ -388,7 +431,7 @@ function detailsHtml(j) {
 }
 
 function cardHtml(j, i, animate) {
-  const status = j.application_deadline ? deadlineStatus(j.application_deadline) : { text: '', cls: '' };
+  const dl = deadlineView(j);
   const isOpen = me && expanded.has(j.hash);
   const tagIds = tagIdsByJob.get(j.hash) || [];
   const noteCount = (notesByJob.get(j.hash) || []).length;
@@ -396,7 +439,6 @@ function cardHtml(j, i, animate) {
   const offline = j.status === 'Offline' ? '<span style="color:var(--text-muted)">offline</span>' : '';
   const notesLabel = me && noteCount ? `<span>${noteCount} note${noteCount === 1 ? '' : 's'}</span>` : '';
   const pdf = j.pdf ? encodeURI(j.pdf) : '';
-  const deadline = j.application_deadline ? formatDate(j.application_deadline) : '-';
   const seen = j.first_seen ? formatDate(j.first_seen) : '-';
   const classes = ['job-card', isOpen ? 'expanded' : '', animate ? '' : 'no-anim'].filter(Boolean).join(' ');
   return `
@@ -413,8 +455,8 @@ function cardHtml(j, i, animate) {
       </div>
       <div class="job-dates">
         <span class="date-label">Deadline</span>
-        <span class="deadline-date${status.text ? '' : ' wide'}" title="${esc(j.application_deadline || 'No deadline detected')}">${esc(deadline)}</span>
-        ${status.text ? `<span class="deadline-status ${status.cls}">${esc(status.text)}</span>` : ''}
+        <span class="deadline-date${dl.status ? '' : ' wide'}${dl.open ? ' open' : ''}" title="${esc(dl.title)}">${esc(dl.text)}</span>
+        ${dl.status ? `<span class="deadline-status ${dl.status.cls}">${esc(dl.status.text)}</span>` : ''}
         <span class="date-label">First seen</span>
         <span class="seen-date"${j.first_seen ? ` title="First found by a fetch on ${esc(formatBerlinStamp(j.first_seen))} (Berlin time)"` : ''}>${esc(seen)}</span>
       </div>
@@ -521,7 +563,7 @@ function renderCharts(jobs) {
 
   const deadlineMap = {};
   jobs.forEach(j => {
-    const d = parseDate(j.application_deadline);
+    const d = deadlineDate(j);
     if (d) {
       const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
       deadlineMap[key] = (deadlineMap[key] || 0) + 1;
