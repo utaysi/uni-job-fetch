@@ -45,7 +45,9 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Notes are easy to spot: a note icon with the number of notes next to the title replaces the small "1 note" text. (2026-11-17)
 - [x] Deadline detection: analyzed all 39 ads (of 116) whose deadline was missing or unreadable and moved detection into `src/deadline.py` with unit tests. Every ad now gets a date, a period after posting (shown as an estimate), "No deadline" (rolling or not stated) or "Unknown" (scanned PDF). Every fetch re-checks all stored ads. (2026-11-17)
 - [x] Needs review mark: anyone on the council can set or clear it in the opened ad (D1 table `review_flags`, `PUT /api/jobs/<hash>/review`); it overrides the parser's flag and shows who changed it last. (2026-11-17)
-- [ ] After the next deploy, check on the live board: note badges, the review mark (set and clear, with two accounts if possible), and a few deadlines (the `elo-hilfskraft_26_11_2` ad should say 25 Nov 2026, the physics "Dauerausschreibung" ads "No deadline"). The deploy run's fetch log should say "Deadlines updated by re-check: 23" or close to it.
+- [ ] Check on the live board: note badges, the review mark (set and clear, with two accounts if possible), and a few deadlines (the `elo-hilfskraft_26_11_2` ad should say 25 Nov 2026, the physics "Dauerausschreibung" ads "No deadline"). Deployed 2026-11-17; the deploy's re-check updated 23 deadlines as expected.
+- [x] Deadline corrections: in the opened ad, anyone on the council can set another date or "No deadline", or go back with "Use detected" (D1 table `deadline_overrides`, `PUT`/`DELETE /api/jobs/<hash>/deadline`). The card shows a pencil next to "Deadline"; the tooltip says who set it and what was detected. (2026-11-17, deployed.)
+- [ ] On the live board: set a date on one ad, change it to "No deadline", then "Use detected".
 - [ ] One ad (`ausschreibung-praktikumsstelle`, a poster) is a scanned image with no text layer, so it shows "Unknown". It gives no deadline (checked by eye). Optional: OCR scanned PDFs with Tesseract (needs `tesseract-ocr` and `tesseract-ocr-deu` installed in the workflow, and the German language pack locally).
 - [ ] Job-ID extraction picks up wrong text on several ads, for example `in`, `bitte ausfüllen`, `in einer PDF-Datei an` and IDs with `Umfang: 11h/Monat` appended. Analyze like the deadlines. (Found 2026-11-17.)
 
@@ -83,8 +85,17 @@ Steps are described in detail in [docs/TECHNICAL.md](docs/TECHNICAL.md#one-time-
 - [x] Dashboard: script moved to `web/app.js`, all data escaped, Chart.js vendored, Google Fonts removed, "Last fetched", notes, tags, tag filter, Fetch now button. (2026-11-16)
 - [x] Worker: Access token verification on every request, notes/tags/fetch API with limits, security headers, D1 schema, 22 tests. (2026-11-16)
 - [x] Deployment templates in `deploy/` and hosting docs in `docs/TECHNICAL.md`. (2026-11-16)
+- [x] Workflow: a run that waited in the queue checked out stale data, so its data push failed and it did not deploy. The data checkout now uses the branch. (2026-11-17)
 
 ## Session log
+
+### 2026-11-17 (deadline corrections, deploys)
+
+- Built deadline corrections for the hosted dashboard: migration `0003_deadline_overrides.sql` (kind `date` with a deadline, or `none`), `PUT /api/jobs/<hash>/deadline` (real dates from 2000 to 2100 only, origin check, daily write cap) and `DELETE` to go back to the detected deadline, corrections included in `/api/annotations`. The page uses a correction everywhere the deadline is used (card, countdown, deadline sort, range filter, timeline) and shows a Deadline section in the opened ad with the detected value, a date field, "No deadline" and "Use detected".
+- Verified: Worker tests 28 pass (3 new: set, change, reset; validation including 30 February and years outside 2000 to 2100; origin check and write cap); Python tests and `py_compile` pass; browser tests against the mock API: set a date on a "No deadline" ad, the card shows the pencil and countdown, the deadline sort places it among upcoming dates, "No deadline" and "Use detected" work, a dated ad starts with its detected date, no sideways scroll at 375px; the earlier browser tests still pass; real `jobs.py serve` under the Worker CSP shows no errors.
+- Deploys, at the owner's request: pushed the deadline, notes badge and review commits (`10d1022`). My manual run failed at "Save data": it had queued behind a "Fetch now" run and checked out the data commit from when it was started, so its push was rejected and it did not deploy (migration 0002 was applied before that). The owner's next "Fetch now" run deployed `10d1022` (re-check updated 23 deadlines). Fixed the workflow: the data checkout now uses the branch (`ref: ${{ github.ref }}`) in `deploy/update.yml` and the data repo copy.
+- Committed the other session's cron change (04:17 UTC) together with the fix in both repos, at the owner's request; the two workflow copies are identical. Pushed both repos (code `8bb2253`) and deployed with a manual run: all steps passed, data checked out by branch, migration 0003 applied, 3 files uploaded. The board still answers 302 to the Access login.
+- Not verified: the new features on the live board while logged in.
 
 ### 2026-11-17 (deadlines, notes badge, review mark)
 
