@@ -7,7 +7,7 @@ Background detail for Uni Job Fetch that most users do not need. For everyday us
 
 ```
 src/      Python modules (run with `py src/jobs.py`)
-web/      dashboard page (index.html, app.js, vendored Chart.js)
+web/      dashboard page (index.html, app.js, tab icons, vendored Chart.js)
 data/     jobs.db, pdfs/, wheels/, backup/ (all generated or vendored; for hosting, a private git repo)
 tests/    Python unit tests (deadline detection)
 worker/   Cloudflare Worker for the hosted dashboard (login check, notes/tags/review/deadline API, fetch button)

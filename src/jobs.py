@@ -180,7 +180,7 @@ def cmd_serve(args):
 
 
 WEB_DIR = 'web'
-SITE_FILES = ['index.html', 'app.js']
+SITE_FILES = ['index.html', 'app.js', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png']
 SITE_DIRS = ['vendor']
 
 
