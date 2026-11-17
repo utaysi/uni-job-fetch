@@ -40,6 +40,8 @@ let timelineChart = null;
 
 // Hosted-only state. `me` stays null on the local read-only server.
 let me = null;
+// True for the board owner (ADMIN_EMAILS); only then the Members panel shows.
+let isAdmin = false;
 let notesByJob = new Map();
 let tagsById = new Map();
 let tagIdsByJob = new Map();
@@ -981,6 +983,76 @@ async function startFetch() {
   refreshFetchStatus();
 }
 
+// ---------- Members panel (owner only) ----------
+
+const MEMBER_LOGINS_SHOWN = 10;
+
+function sameLocalDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// "just now", "5 min ago", "3 h ago", "yesterday", "4 days ago", then the date.
+function timeAgo(iso, now = new Date()) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const minutes = Math.max(0, Math.floor((now - d) / 60000));
+  if (minutes < 2) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  if (sameLocalDay(d, now)) return `${Math.floor(minutes / 60)} h ago`;
+  const days = Math.round((startOfToday() - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / DAY_MS);
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === now.getFullYear() ? '' : ' ' + d.getFullYear()}`;
+}
+
+// One login session: when it started, and the last page load in it.
+function loginItemHtml(s) {
+  const start = new Date(s.login_at);
+  const end = new Date(s.last_seen_at);
+  const time = `${pad(end.getHours())}:${pad(end.getMinutes())}`;
+  const until = sameLocalDay(start, end) ? time : `${end.getDate()} ${MONTHS[end.getMonth()]}, ${time}`;
+  return `<li><span>${esc(formatInstant(s.login_at))}</span><span class="member-until">until ${esc(until)}</span></li>`;
+}
+
+function memberHtml(m, sessions, historyDays) {
+  const shown = sessions.slice(0, MEMBER_LOGINS_SHOWN);
+  const more = sessions.length - shown.length;
+  const today = sameLocalDay(new Date(m.last_seen), new Date());
+  const count = `${m.logins} login${m.logins === 1 ? '' : 's'} since ${formatInstant(m.first_login)}`;
+  return `
+    <details class="member">
+      <summary>
+        <span class="member-name" title="${esc(m.email)}">${esc(displayName(m.email))}</span>
+        <span class="member-seen${today ? ' today' : ''}" title="Last seen ${esc(formatInstant(m.last_seen))}">${esc(timeAgo(m.last_seen))}</span>
+      </summary>
+      <div class="member-body">
+        <span class="member-email">${esc(m.email)}</span>
+        <span>${esc(count)}</span>
+        ${shown.length ? `<ul class="member-logins">${shown.map(loginItemHtml).join('')}</ul>` : ''}
+        ${more > 0 ? `<span class="member-until">${more} more in the last ${esc(historyDays)} days</span>` : ''}
+      </div>
+    </details>
+  `;
+}
+
+async function loadMembers() {
+  const list = $('membersList');
+  $('membersPanel').hidden = false;
+  try {
+    const data = await api('GET', 'api/logins');
+    const members = data.members || [];
+    if (!members.length) {
+      list.innerHTML = '<div class="members-empty">No logins recorded yet.</div>';
+      return;
+    }
+    const byEmail = new Map(members.map(m => [m.email, []]));
+    (data.recent || []).forEach(s => byEmail.has(s.email) && byEmail.get(s.email).push(s));
+    list.innerHTML = members.map(m => memberHtml(m, byEmail.get(m.email), data.history_days)).join('');
+  } catch (err) {
+    list.innerHTML = `<div class="members-empty">${esc(err.message)}</div>`;
+  }
+}
+
 // ---------- Loading ----------
 
 function indexJobs() {
@@ -1010,7 +1082,10 @@ async function detectHosted() {
     const res = await fetch('api/me', { cache: 'no-store', redirect: 'manual' });
     if (!res.ok) return;
     const data = await res.json();
-    if (data && typeof data.email === 'string') me = data.email;
+    if (data && typeof data.email === 'string') {
+      me = data.email;
+      isAdmin = data.admin === true;
+    }
   } catch {
     return;
   }
@@ -1027,6 +1102,7 @@ async function detectHosted() {
   $('fetchCtl').hidden = false;
   $('fetchBtn').addEventListener('click', startFetch);
   refreshFetchStatus();
+  if (isAdmin) loadMembers();
 }
 
 function setupLocalHandlers() {
