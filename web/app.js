@@ -159,6 +159,7 @@ function detectedView(j) {
     const relative = kind === 'relative';
     return {
       text: (relative ? '~' : '') + formatDate(j.deadline_iso || raw),
+      estimate: relative,
       status: deadlineStatus(d),
       title: relative
         ? `The ad gives no date, only "${raw}" after it was posted. Estimated as ${j.deadline_days} days after the day it was first seen.`
@@ -244,10 +245,14 @@ function termTitle(j, field, info) {
   return info.basis + hint;
 }
 
+// A small "?" after an estimate ("~"), so people see that hovering explains it.
+const HINT = '<span class="hint" aria-hidden="true">?</span>';
+
 function termSpan(j, field) {
   const info = termInfo(j, field);
   const unknown = info.value === null && !info.permanent;
-  return `<span class="term${unknown ? ' unknown' : ''}" title="${esc(termTitle(j, field, info))}">${esc(formatTerm(info, field))}${info.edit ? ' &#9998;' : ''}</span>`;
+  const classes = ['term', unknown ? 'unknown' : '', info.estimate ? 'has-hint' : ''].filter(Boolean).join(' ');
+  return `<span class="${classes}" title="${esc(termTitle(j, field, info))}">${esc(formatTerm(info, field))}${info.estimate ? HINT : ''}${info.edit ? ' &#9998;' : ''}</span>`;
 }
 
 // Sort by duration or hours; ads without a value always go last.
@@ -708,7 +713,7 @@ function cardHtml(j, i, animate) {
       </div>
       <div class="job-dates">
         <span class="date-label"${dl.edited ? ' title="Corrected on the dashboard"' : ''}>Deadline${dl.edited ? ' &#9998;' : ''}</span>
-        <span class="deadline-date${dl.status ? '' : ' wide'}${dl.open ? ' open' : ''}" title="${esc(dl.title)}">${esc(dl.text)}</span>
+        <span class="deadline-date${dl.status ? '' : ' wide'}${dl.open ? ' open' : ''}${dl.estimate ? ' has-hint' : ''}" title="${esc(dl.title)}">${esc(dl.text)}${dl.estimate ? HINT : ''}</span>
         ${dl.status ? `<span class="deadline-status ${dl.status.cls}">${esc(dl.status.text)}</span>` : ''}
         <span class="date-label">First seen</span>
         <span class="seen-date"${j.first_seen ? ` title="First found by a fetch on ${esc(formatBerlinStamp(j.first_seen))} (Berlin time)"` : ''}>${esc(seen)}</span>

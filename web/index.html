@@ -619,7 +619,7 @@ body {
    lined up from card to card. */
 .job-dates {
   display: grid;
-  grid-template-columns: 4.25rem 5.75rem 4rem;
+  grid-template-columns: 4.25rem 6.5rem 4rem;
   column-gap: 0.5rem;
   row-gap: 0.125rem;
   align-items: baseline;
@@ -663,6 +663,25 @@ body {
 }
 
 .term.unknown { color: var(--text-muted); }
+
+/* The "?" after an estimate ("~"): hovering the value explains how it was counted. */
+.has-hint { cursor: help; }
+
+.hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-left: 0.15rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-muted);
+  vertical-align: 0.1em;
+}
 .terms-sep { margin: 0 0.3rem; color: var(--text-muted); }
 
 .deadline-future { color: var(--green); }
