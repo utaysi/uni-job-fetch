@@ -74,7 +74,7 @@ Run **Serve dashboard** to explore the repository in the browser: totals at a gl
 - **Sort**: newest first (by the date an ad was first seen, the default), oldest first, deadline soonest, title, department, shortest or longest contract, or fewest or most hours. Ads without a duration or hours go last.
 - **Jobs by Department**: color-coded donut showing where the openings are concentrated.
 - **Deadlines Timeline**: how many applications close on each date.
-- **Job Listings**: each row shows the position, department, Job-ID, deadline with how many days are left (or "No deadline" for ads that take applications at any time), the date the ad was first seen, and the contract duration and hours per month read from the ad (`~` marks an estimate; hover for how it was counted), with a ⚠ review badge where applicable.
+- **Job Listings**: each row shows the position, department, Job-ID, deadline with how many days are left (or "No deadline" for ads that take applications at any time), the date the ad was first seen, and the contract duration and hours per month read from the ad (`~` and a small `?` mark an estimate; hover for how it was counted), with a ⚠ review badge where applicable.
 
 The dashboard can also be hosted online behind a login, for example for a staff council. The hosted version adds shared notes and tags on each ad, a "needs review" mark anyone can set or clear, deadline corrections, duration and hours corrections, a "Last fetched" time, a daily automatic fetch, and a limited "Fetch now" button. See [Hosting](docs/TECHNICAL.md#hosting-the-dashboard-online).
 

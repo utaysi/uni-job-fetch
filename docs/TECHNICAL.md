@@ -41,7 +41,7 @@ folder so the PDF links (which point at `data/pdfs/`) keep working.
 `src/deadline.py` decides each ad's application deadline. It starts with the value under "Bewerbungsfrist" in the ad's labelled box and checks it against the ad's full text:
 
 - **Date**: a date in the box, after a label in the text ("Bewerbungsfrist: 25. August 2025"), or in the application sentence ("senden Sie bitte bis zum 25.11.2026"). Numeric dates, German and English month names (also abbreviated) and dates without a year are understood. A date in the text wins over "2 Wochen" in the box. Contract periods ("befristet bis zum ...") and date ranges are not taken for the deadline.
-- **Period after posting** ("mind. 2 Wochen" with no date anywhere): the dashboard shows an estimate, that many days after the ad was first seen, marked with `~`.
+- **Period after posting** ("mind. 2 Wochen" with no date anywhere): the dashboard shows an estimate, that many days after the ad was first seen, marked with `~` and a small `?` that explains it on hover.
 - **No deadline**: either the ad says applications are taken any time ("laufend", "jederzeit", "Dauerausschreibung", "in den kommenden Wochen", "immer wieder ... gesucht"), or it gives no deadline at all. Hover over "No deadline" on the dashboard to see which.
 - **Unknown**: the PDF is a scanned image without text, so nothing can be read. Open the PDF to check.
 
@@ -67,7 +67,7 @@ Hours per month:
 - **Total hours** ("Je 88 Std. insges."): divided by the duration, as an estimate. Without a duration they stay unknown until a council member enters one.
 - **Full-time or part-time** ("Vollzeit", "Teilzeit (50 %)"): that share of a 40-hour week (173 or 87 hours a month), as an estimate. Plain "Teilzeit" stays unknown.
 
-Estimates show with `~` on the dashboard, and the tooltip says what the ad says and how the number was counted. Filters and sorting use the number as shown (estimates rounded to whole numbers), so they always agree with the cards. The dashboard data is built from the stored text on every run, so improvements here reach older ads too. A value corrected in Excel is used as written, without searching the text. The tests in `tests/test_terms.py` cover the formats found in the ads on the board.
+Estimates show with `~` and a small `?` on the dashboard, and hovering over them shows what the ad says and how the number was counted. Filters and sorting use the number as shown (estimates rounded to whole numbers), so they always agree with the cards. The dashboard data is built from the stored text on every run, so improvements here reach older ads too. A value corrected in Excel is used as written, without searching the text. The tests in `tests/test_terms.py` cover the formats found in the ads on the board.
 
 ## Installing dependencies (online vs offline)
 
