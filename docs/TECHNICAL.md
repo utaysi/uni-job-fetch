@@ -9,8 +9,8 @@ Background detail for Uni Job Fetch that most users do not need. For everyday us
 src/      Python modules (run with `py src/jobs.py`)
 web/      dashboard page (index.html, app.js, tab icons, vendored Chart.js)
 data/     jobs.db, pdfs/, wheels/, backup/ (all generated or vendored; for hosting, a private git repo)
-tests/    Python unit tests (deadline detection)
-worker/   Cloudflare Worker for the hosted dashboard (login check, notes/tags/review/deadline API, fetch button)
+tests/    Python unit tests (deadline, duration and hours detection, scraper)
+worker/   Cloudflare Worker for the hosted dashboard (login check, notes/tags/review/deadline/duration/hours API, fetch button)
 deploy/   templates for the private data repo (wrangler config, workflow, .gitignore)
 docs/     these notes
 job_ads.xlsx   Excel export, kept at the project root
@@ -46,6 +46,28 @@ folder so the PDF links (which point at `data/pdfs/`) keep working.
 - **Unknown**: the PDF is a scanned image without text, so nothing can be read. Open the PDF to check.
 
 Every fetch re-reads the box of every stored PDF and runs the detection again, so improvements reach older ads too (this takes well under a second). A deadline corrected in Excel is kept as you wrote it. On the hosted dashboard, a deadline corrected by a council member takes the place of both. The tests in `tests/test_deadline.py` cover each kind of ad that was misread before; run them with `.venv/bin/python -m unittest discover -s tests`.
+
+## How contract duration and hours are read
+
+`src/terms.py` turns the "Befristung" and "Umfang" values from the ad's labelled box into two numbers, the contract duration in months and the hours per month, so the dashboard can filter and sort by them. When the box gives nothing usable, it looks in the ad's full text, but only in phrases that clearly describe the contract ("befristet bis zum 31.05.2027", "für die Dauer von drei Monaten", "20 Stunden pro Monat"), so a requirement such as "mindestens 4 Semester" is not taken for a duration.
+
+Duration:
+
+- **Stated** ("12 Monate", "1 Jahr", "zunächst für 12 Monate"): taken as is.
+- **End date** ("31.12.2027"): counted from the start date ("Eintrittstermin"). If the ad gives none ("nächstmöglich"), from the day it was first seen, as an estimate.
+- **Semester** ("Wintersemester 2026/27"): the official dates, 1 October to 31 March or 1 April to 30 September, as an estimate. "Semesterende" counts from the start (or first seen) to the end of that semester.
+- **Range** ("3-6 Monate"): the longer one, as an estimate.
+- **Permanent** ("unbefristet"): longer than any duration in filters and sorting.
+
+Hours per month:
+
+- **Stated** ("40 Std./Monat", "bis zu 40 Std./Monat"): taken as is, so "bis zu" counts as its upper limit.
+- **Range** ("30 - 37 Std./Mo."): the higher one, as an estimate.
+- **Weekly hours**: times 52/12, as an estimate.
+- **Total hours** ("Je 88 Std. insges."): divided by the duration, as an estimate. Without a duration they stay unknown until a council member enters one.
+- **Full-time or part-time** ("Vollzeit", "Teilzeit (50 %)"): that share of a 40-hour week (173 or 87 hours a month), as an estimate. Plain "Teilzeit" stays unknown.
+
+Estimates show with `~` on the dashboard, and the tooltip says what the ad says and how the number was counted. Filters and sorting use the number as shown (estimates rounded to whole numbers), so they always agree with the cards. The dashboard data is built from the stored text on every run, so improvements here reach older ads too. A value corrected in Excel is used as written, without searching the text. The tests in `tests/test_terms.py` cover the formats found in the ads on the board.
 
 ## Installing dependencies (online vs offline)
 
@@ -102,22 +124,23 @@ The hosted version adds features the local dashboard does not have:
 
 - **Notes** on each ad, signed with the author's name and time. Everyone can add notes; only the author can edit or delete their own. Ads with notes show a note icon with the number of notes next to the title.
 - **Deadline corrections**: in the opened ad, anyone can set the deadline to another date or to "No deadline", and go back to the detected one with "Use detected". A corrected deadline shows a pencil next to "Deadline" on the card, and its tooltip says who set it and what was detected.
+- **Duration and hours corrections**: in the opened ad, anyone can enter the contract duration (months) or the hours per month where the detection found nothing or got it wrong, and go back with "Use detected". An entered value shows a pencil on the card, and its tooltip says who set it and what was detected. Total hours ("88 Std. insgesamt") are spread over an entered duration.
 - **Needs review** mark: anyone can set it on an ad or remove it, from the opened ad. This overrides the mark the parser (or the Excel round-trip) set, and the ad shows who changed it last.
 - **Tags** on each ad: type a new one or pick an existing one, then filter the list by tag, or pick "No tags" to see only ads nobody has tagged yet. Selected tag filters combine with "or". A tag disappears once it is removed from every ad.
 - **Last fetched**: when the job list was last updated. Next to it, "Auto-fetch every 24 h" is a reminder that the board fetches by itself once a day, early in the morning (the cron in the data repo's workflow); its tooltip says so.
 - **Fetch now**: starts an extra fetch. All council members share 3 per day, which reset at midnight Berlin time. The daily automatic fetch does not count toward this limit.
 - **Members** (owner only): a panel at the bottom of the sidebar lists who has logged in and when. It shows only for the emails in `ADMIN_EMAILS` (see "Seeing who logged in" below).
 
-Clicking an ad on the hosted dashboard opens its deadline, review mark, tags and notes. The PDF button opens the ad itself.
+Clicking an ad on the hosted dashboard opens its deadline, duration and hours, review mark, tags and notes. The PDF button opens the ad itself.
 
 ### What lives where
 
 | Place | Contents |
 | --- | --- |
 | Public code repo (this one) | Code only: scraper, dashboard, Worker, database schema, deployment templates. No data, secrets, domain or login settings. |
-| Private data repo | `jobs.db`, `pdfs/`, a daily `annotations.sql` backup of notes, tags, review marks, deadline corrections and logins, `wrangler.toml` (domain, login and admin settings), and the workflow that fetches and deploys. |
+| Private data repo | `jobs.db`, `pdfs/`, a daily `annotations.sql` backup of notes, tags, review marks, deadline, duration and hours corrections and logins, `wrangler.toml` (domain, login and admin settings), and the workflow that fetches and deploys. |
 | GitHub Actions | Runs the workflow on temporary machines: once a day, and when someone presses Fetch now. |
-| Cloudflare | Serves the dashboard and PDFs, enforces the login (Cloudflare Access), runs the Worker, and stores notes, tags, review marks, deadline corrections and logins (D1 database). |
+| Cloudflare | Serves the dashboard and PDFs, enforces the login (Cloudflare Access), runs the Worker, and stores notes, tags, review marks, deadline, duration and hours corrections and logins (D1 database). |
 
 ### How it is secured
 
