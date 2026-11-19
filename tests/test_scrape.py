@@ -53,6 +53,7 @@ class FakeConnection:
         self.timeout = None
         self.closed = False
         self.requests = []
+        self.methods = []
 
     def connect(self):
         self.server.tick(self.server.connect_s)
@@ -61,6 +62,7 @@ class FakeConnection:
     def request(self, method, target, headers=None):
         self.sock = self.sock or FakeSocket()
         self.requests.append(target)
+        self.methods.append(method)
         self._target = target
 
     def getresponse(self):
@@ -232,6 +234,34 @@ class Client(unittest.TestCase):
         self.assertEqual(lines[2], '  the server answered "Connection: close" 1 time(s)')
         self.assertEqual(lines[3], '  slowest 2:')
         self.assertEqual(scrape.KeepAliveClient().summary(), [])
+
+    def test_head_gives_the_size_without_a_body(self):
+        client = self.client({'/a.pdf': lambda: FakeResponse(200, b'', {'Content-Length': '3126112'}),
+                              '/b.pdf': ok(b'B')})
+        self.assertEqual(client.head(f'{BASE}/a.pdf', 30), 3126112)
+        self.assertEqual(client.get(f'{BASE}/b.pdf', 30, 100), b'B')
+        self.assertEqual(self.server.connections[0].methods, ['HEAD', 'GET'])
+        self.assertEqual(len(self.server.connections), 1)
+        self.assertEqual(client.timings[0].method, 'HEAD')
+        self.assertTrue(client.timings[0].describe().endswith(' HEAD /a.pdf'))
+
+    def test_head_without_a_usable_size(self):
+        for headers in ({}, {'Content-Length': 'many'}, {'Content-Length': '-1'}):
+            client = self.client({'/a.pdf': lambda: FakeResponse(200, b'', headers)})
+            self.assertIsNone(client.head(f'{BASE}/a.pdf', 30), headers)
+
+    def test_head_follows_checked_redirects_and_raises_on_errors(self):
+        client = self.client({'/old.pdf': redirect('/new.pdf'),
+                              '/new.pdf': lambda: FakeResponse(200, b'', {'Content-Length': '7'}),
+                              '/gone.pdf': lambda: FakeResponse(403),
+                              '/away.pdf': redirect('https://evil.example.org/a.pdf')})
+        self.assertEqual(client.head(f'{BASE}/old.pdf', 30), 7)
+        with self.assertRaises(scrape.HTTPStatusError):
+            client.head(f'{BASE}/gone.pdf', 30)
+        with self.assertRaisesRegex(ValueError, 'non-university'):
+            client.head(f'{BASE}/away.pdf', 30)
+        with self.assertRaisesRegex(ValueError, 'non-university'):
+            client.head('https://example.org/a.pdf', 30)
 
     def test_close_closes_every_connection(self):
         client = self.client({'/a.pdf': [redirect('https://cms.uni-marburg.de/a.pdf'), ok()]})

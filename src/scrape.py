@@ -90,6 +90,7 @@ class Timing:
     size: int           # body bytes
     status: int
     connection: str     # the server's "Connection" header ("keep-alive", "close" or "")
+    method: str = 'GET'
 
     @property
     def total_s(self):
@@ -99,6 +100,8 @@ class Timing:
         how = 'reused connection' if self.reused else 'new connection'
         said = f', server says "Connection: {self.connection}"' if self.connection else ''
         path = urllib.parse.urlsplit(self.url).path
+        if self.method != 'GET':
+            path = f'{self.method} {path}'
         return (f'{self.total_s:.1f} s (connect {self.connect_s:.1f}, answer {self.answer_s:.1f}, '
                 f'body {self.body_s:.1f}; {how}, {self.size // 1024} KB, HTTP {self.status}{said}) {path}')
 
@@ -109,7 +112,7 @@ def _https_connection(host, port, timeout):
 
 
 class KeepAliveClient:
-    """GET requests that reuse one open HTTPS connection per host.
+    """GET and HEAD requests that reuse one open HTTPS connection per host.
 
     urllib opens a new connection for every request. The university's servers hold
     back new connections that arrive in quick succession (1 to 5 seconds each), so a
@@ -129,10 +132,26 @@ class KeepAliveClient:
         self.slow_log = None  # called with a line for each request slower than SLOW_REQUEST_S
 
     def get(self, url, timeout, max_bytes):
+        return self._request('GET', url, timeout, max_bytes)[0]
+
+    def head(self, url, timeout):
+        """The size in bytes the server gives for url (its Content-Length), or None.
+
+        Nothing is downloaded, so this is cheap even when the server sends slowly.
+        """
+        length = self._request('HEAD', url, timeout, 0)[1]
+        try:
+            size = int(length)
+        except (TypeError, ValueError):
+            return None
+        return size if size >= 0 else None
+
+    def _request(self, method, url, timeout, max_bytes):
+        """(body, Content-Length header) of the final answer, following checked redirects."""
         if not is_allowed_url(url):
             raise ValueError(f'refusing to fetch non-university URL: {url}')
         for _ in range(MAX_REDIRECTS + 1):
-            status, reason, location, data = self._get_once(url, timeout, max_bytes)
+            status, reason, location, data, length = self._once(method, url, timeout, max_bytes)
             if status in REDIRECT_CODES and location:
                 target = urllib.parse.urljoin(url, location)
                 if not is_allowed_url(target):
@@ -141,14 +160,14 @@ class KeepAliveClient:
                 continue
             if not 200 <= status < 300:
                 raise HTTPStatusError(status, reason, url)
-            return data
+            return data, length
         raise ValueError(f'too many redirects: {url}')
 
     def close(self):
         for key in list(self._conns):
             self._drop(key)
 
-    def _get_once(self, url, timeout, max_bytes):
+    def _once(self, method, url, timeout, max_bytes):
         parts = urllib.parse.urlsplit(url)
         key = (parts.hostname, parts.port or 443)
         target = (parts.path or '/') + (f'?{parts.query}' if parts.query else '')
@@ -165,7 +184,7 @@ class KeepAliveClient:
                 else:
                     conn.connect()  # explicitly, so the handshake is timed on its own
                 sent = self._clock()
-                conn.request('GET', target, headers=HEADERS)
+                conn.request(method, target, headers=HEADERS)
                 resp = conn.getresponse()
                 answered = self._clock()
                 data = resp.read(max_bytes + 1)
@@ -180,12 +199,12 @@ class KeepAliveClient:
                 self._drop(key)
                 raise
             self._record(Timing(url, reused, sent - started, answered - sent, done - answered,
-                                min(len(data), max_bytes), resp.status, resp.getheader('Connection') or ''))
+                                min(len(data), max_bytes), resp.status, resp.getheader('Connection') or '', method))
             if not resp.isclosed():
                 self._drop(key)  # part of the body is still unread, so the connection is unusable
             if len(data) > max_bytes:
                 raise ValueError(f'response larger than {max_bytes} bytes: {url}')
-            return resp.status, resp.reason, resp.getheader('Location'), data
+            return resp.status, resp.reason, resp.getheader('Location'), data, resp.getheader('Content-Length')
 
     def _record(self, timing):
         self.timings.append(timing)
@@ -337,3 +356,8 @@ def discover_all(log):
 
 def download(url):
     return _read_capped(url, 60, MAX_PDF_BYTES)
+
+
+def size(url):
+    """The size the server gives for a PDF, without downloading it (None if it gives none)."""
+    return _client.head(url, 30)

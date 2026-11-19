@@ -21,6 +21,8 @@ import os
 import re
 import shutil
 import sys
+import zlib
+from datetime import date
 
 import deadline
 import exporter
@@ -45,6 +47,44 @@ def resolve_department(scrape_dept, pdf_text):
         return scrape_dept
     pdf_dept = extract.department_from_pdf(pdf_text)
     return pdf_dept or scrape_dept or ''
+
+
+# Every PDF is downloaded in full at least this often, in case it changed without
+# its size changing. Links are spread over the days, so each fetch downloads about
+# a seventh of the known PDFs.
+FULL_DOWNLOAD_DAYS = 7
+
+
+def full_download_due(url, known, today):
+    """True if a known link's PDF should be downloaded again in full today."""
+    try:
+        last = date.fromisoformat((known['downloaded_at'] or '')[:10])
+    except ValueError:
+        return True
+    if last >= today:
+        return False
+    if (today - last).days >= FULL_DOWNLOAD_DAYS:
+        return True
+    return zlib.crc32(url.encode()) % FULL_DOWNLOAD_DAYS == today.toordinal() % FULL_DOWNLOAD_DAYS
+
+
+def unchanged_hash(conn, url, today):
+    """The stored ad of a link whose PDF need not be downloaded, or None.
+
+    That is a link fetched before, whose ad is still stored, that is not due for its
+    weekly full download, and for which the server gives the same size as last time.
+    At times the university sends to GitHub at only about 55 KB/s, so downloading all
+    PDFs again took about 10 minutes; asking for the size takes a fraction of a second.
+    The server gives no ETag or Last-Modified, so the size is the only cheap check.
+    """
+    known = store.known_url(conn, url)
+    if known is None or not store.exists(conn, known['hash']) or full_download_due(url, known, today):
+        return None
+    try:
+        size = scrape.size(url)
+    except Exception:
+        return None  # download it instead, which reports the error as before
+    return known['hash'] if size == known['size'] else None
 
 
 def recheck_deadlines(conn):
@@ -91,10 +131,19 @@ def cmd_fetch(args):
     seen_hashes = set()
     new_count = 0
     updated_count = 0
+    unchanged_count = 0
     errors = 0
     seen_at = store.now_iso()
+    today = date.fromisoformat(store.today())
 
     for i, ad in enumerate(ads, 1):
+        known_hash = unchanged_hash(conn, ad['url'], today)
+        if known_hash:
+            seen_hashes.add(known_hash)
+            store.mark_seen(conn, known_hash, seen_at)
+            updated_count += 1
+            unchanged_count += 1
+            continue
         try:
             data = scrape.download(ad['url'])
         except Exception as e:
@@ -108,6 +157,7 @@ def cmd_fetch(args):
 
         hash_ = hashlib.sha256(data).hexdigest()[:16]
         seen_hashes.add(hash_)
+        store.remember_url(conn, ad['url'], hash_, len(data), seen_at)
 
         if store.exists(conn, hash_):
             store.mark_seen(conn, hash_, seen_at)
@@ -147,6 +197,8 @@ def cmd_fetch(args):
     print()
     print(f'New ads:        {new_count}')
     print(f'Still online:   {updated_count}')
+    if unchanged_count:
+        print(f'  ({unchanged_count} of them not downloaded: same size as last time)')
     print(f'Newly offline:  {offline}')
     if errors:
         print(f'Errors/skipped: {errors}')

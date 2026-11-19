@@ -61,10 +61,24 @@ CREATE TABLE IF NOT EXISTS jobs (
 """
 
 
+# The PDF each ad link pointed to on the last fetch, its size and when it was last
+# downloaded. A fetch asks the server only for the size of a known link and skips
+# the download when it matches (see jobs.unchanged_hash).
+URL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS urls (
+    url TEXT PRIMARY KEY,
+    hash TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    downloaded_at TEXT NOT NULL
+);
+"""
+
+
 def connect(db_path=DB_PATH):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute(SCHEMA)
+    conn.execute(URL_SCHEMA)
     return conn
 
 
@@ -110,6 +124,18 @@ def insert_job(conn, hash_, fields, original_pdf_name, count, pdf_filename, seen
     cols = ', '.join(data)
     placeholders = ', '.join('?' for _ in data)
     conn.execute(f'INSERT INTO jobs ({cols}) VALUES ({placeholders})', list(data.values()))
+
+
+def known_url(conn, url):
+    """What the last download of url gave: a row with hash, size and downloaded_at, or None."""
+    return conn.execute('SELECT hash, size, downloaded_at FROM urls WHERE url=?', (url,)).fetchone()
+
+
+def remember_url(conn, url, hash_, size, downloaded_at):
+    conn.execute('INSERT INTO urls (url, hash, size, downloaded_at) VALUES (?, ?, ?, ?) '
+                 'ON CONFLICT (url) DO UPDATE SET hash=excluded.hash, size=excluded.size, '
+                 'downloaded_at=excluded.downloaded_at',
+                 (url, hash_, size, downloaded_at))
 
 
 def mark_seen(conn, hash_, seen_at):
