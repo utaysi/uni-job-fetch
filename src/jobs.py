@@ -84,6 +84,7 @@ def cmd_fetch(args):
         print(msg)
 
     print('=== Uni Marburg Job Fetcher ===')
+    scrape.log_slow_requests(log)
     ads = scrape.discover_all(log)
     print(f'\nDiscovered {len(ads)} ad link(s) total.\n')
 
@@ -135,6 +136,9 @@ def cmd_fetch(args):
         print(f"  [{i}/{len(ads)}] NEW {filename}{flag}")
 
     scrape.close()
+    print()
+    for line in scrape.timing_summary():
+        print(line)
     offline = store.mark_offline_missing(conn, seen_hashes)
     rechecked = recheck_deadlines(conn)
     conn.commit()

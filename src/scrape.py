@@ -10,7 +10,9 @@ import http.client
 import os
 import re
 import ssl
+import time
 import urllib.parse
+from dataclasses import dataclass
 
 MAIN_URL = ('https://www.uni-marburg.de/de/universitaet/administration/verwaltung/'
             'dezernat2/personalabteilung/bewerber/stud-und-wiss-hilfskraftstellen')
@@ -72,6 +74,35 @@ class HTTPStatusError(Exception):
         self.url = url
 
 
+# Requests slower than this are logged as they happen, so even a run that is
+# stopped by the workflow's time limit shows where the time went.
+SLOW_REQUEST_S = 1.0
+
+
+@dataclass
+class Timing:
+    """How long one request took, by phase, for the fetch log."""
+    url: str
+    reused: bool        # sent over a connection that was already open
+    connect_s: float    # TCP and TLS handshake (0 when reused)
+    answer_s: float     # from sending the request to the response headers
+    body_s: float       # reading the body
+    size: int           # body bytes
+    status: int
+    connection: str     # the server's "Connection" header ("keep-alive", "close" or "")
+
+    @property
+    def total_s(self):
+        return self.connect_s + self.answer_s + self.body_s
+
+    def describe(self):
+        how = 'reused connection' if self.reused else 'new connection'
+        said = f', server says "Connection: {self.connection}"' if self.connection else ''
+        path = urllib.parse.urlsplit(self.url).path
+        return (f'{self.total_s:.1f} s (connect {self.connect_s:.1f}, answer {self.answer_s:.1f}, '
+                f'body {self.body_s:.1f}; {how}, {self.size // 1024} KB, HTTP {self.status}{said}) {path}')
+
+
 def _https_connection(host, port, timeout):
     return http.client.HTTPSConnection(host, port, timeout=timeout,
                                        context=ssl.create_default_context())
@@ -89,9 +120,13 @@ class KeepAliveClient:
     it is requested, and every response body is capped at max_bytes.
     """
 
-    def __init__(self, connect=_https_connection):
+    def __init__(self, connect=_https_connection, clock=time.monotonic):
         self._connect = connect
+        self._clock = clock
         self._conns = {}
+        self.timings = []     # one Timing per answered request
+        self.retries = 0      # requests sent again after the server closed an idle connection
+        self.slow_log = None  # called with a line for each request slower than SLOW_REQUEST_S
 
     def get(self, url, timeout, max_bytes):
         if not is_allowed_url(url):
@@ -123,25 +158,60 @@ class KeepAliveClient:
                 conn = self._conns[key] = self._connect(key[0], key[1], timeout)
             reused = conn.sock is not None
             conn.timeout = timeout
-            if reused:
-                conn.sock.settimeout(timeout)
+            started = self._clock()
             try:
+                if reused:
+                    conn.sock.settimeout(timeout)
+                else:
+                    conn.connect()  # explicitly, so the handshake is timed on its own
+                sent = self._clock()
                 conn.request('GET', target, headers=HEADERS)
                 resp = conn.getresponse()
+                answered = self._clock()
                 data = resp.read(max_bytes + 1)
+                done = self._clock()
             except (ConnectionError, http.client.BadStatusLine):
                 self._drop(key)
                 if reused and attempt == 1:
+                    self.retries += 1
                     continue  # the server closed the idle connection; ask once more on a new one
                 raise
             except Exception:
                 self._drop(key)
                 raise
+            self._record(Timing(url, reused, sent - started, answered - sent, done - answered,
+                                min(len(data), max_bytes), resp.status, resp.getheader('Connection') or ''))
             if not resp.isclosed():
                 self._drop(key)  # part of the body is still unread, so the connection is unusable
             if len(data) > max_bytes:
                 raise ValueError(f'response larger than {max_bytes} bytes: {url}')
             return resp.status, resp.reason, resp.getheader('Location'), data
+
+    def _record(self, timing):
+        self.timings.append(timing)
+        if self.slow_log and timing.total_s > SLOW_REQUEST_S:
+            self.slow_log(f'  slow request: {timing.describe()}')
+
+    def summary(self, slowest=5):
+        """Lines for the end of the fetch log: where the request time went."""
+        t = self.timings
+        if not t:
+            return []
+        total = sum(x.total_s for x in t)
+        new = sum(not x.reused for x in t)
+        lines = [
+            f'Requests: {len(t)} in {total:.1f} s ({new} on new connections, {self.retries} sent again '
+            f'after the server closed the connection)',
+            f'  connecting {sum(x.connect_s for x in t):.1f} s, waiting for answers '
+            f'{sum(x.answer_s for x in t):.1f} s, reading bodies {sum(x.body_s for x in t):.1f} s',
+        ]
+        closing = sum(x.connection.lower() == 'close' for x in t)
+        if closing:
+            lines.append(f'  the server answered "Connection: close" {closing} time(s)')
+        lines.append(f'  slowest {min(slowest, len(t))}:')
+        for x in sorted(t, key=lambda x: x.total_s, reverse=True)[:slowest]:
+            lines.append(f'    {x.describe()}')
+        return lines
 
     def _drop(self, key):
         conn = self._conns.pop(key, None)
@@ -159,6 +229,16 @@ def _read_capped(url, timeout, max_bytes):
 def close():
     """Close the open connections (call when the fetch is done)."""
     _client.close()
+
+
+def log_slow_requests(log):
+    """Log each request slower than SLOW_REQUEST_S as it happens."""
+    _client.slow_log = log
+
+
+def timing_summary():
+    """Lines summing up how long the requests took, for the end of the fetch log."""
+    return _client.summary()
 
 
 def fetch_page(url, log):

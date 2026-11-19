@@ -54,6 +54,10 @@ class FakeConnection:
         self.closed = False
         self.requests = []
 
+    def connect(self):
+        self.server.tick(self.server.connect_s)
+        self.sock = FakeSocket()
+
     def request(self, method, target, headers=None):
         self.sock = self.sock or FakeSocket()
         self.requests.append(target)
@@ -74,6 +78,15 @@ class FakeServer:
     def __init__(self, routes):
         self.routes = routes  # path -> FakeResponse factory, or a list consumed in order
         self.connections = []
+        self.now = 0.0          # fake clock, moved on by the fake network
+        self.connect_s = 0.0    # time a new connection takes
+        self.answer_s = {}      # path -> time until the response headers arrive
+
+    def tick(self, seconds):
+        self.now += seconds
+
+    def clock(self):
+        return self.now
 
     def connect(self, host, port, timeout):
         conn = FakeConnection(self, host)
@@ -81,6 +94,7 @@ class FakeServer:
         return conn
 
     def answer(self, conn, target):
+        self.tick(self.answer_s.get(target, 0.0))
         route = self.routes[target]
         if isinstance(route, list):
             route = route.pop(0)
@@ -98,7 +112,7 @@ def redirect(location, status=302):
 class Client(unittest.TestCase):
     def client(self, routes):
         self.server = FakeServer(routes)
-        return scrape.KeepAliveClient(connect=self.server.connect)
+        return scrape.KeepAliveClient(connect=self.server.connect, clock=self.server.clock)
 
     def test_reuses_one_connection_for_many_requests(self):
         client = self.client({'/a.pdf': ok(b'A'), '/b.pdf': ok(b'B')})
@@ -181,6 +195,43 @@ class Client(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             client.get(f'{BASE}/b.pdf', 30, 100)
         self.assertTrue(self.server.connections[0].closed)
+
+    def test_times_each_request_by_phase(self):
+        client = self.client({'/a.pdf': ok(b'A' * 2048), '/b.pdf': lambda: FakeResponse(200, b'B', {'Connection': 'close'})})
+        self.server.connect_s = 0.5
+        self.server.answer_s = {'/a.pdf': 0.25, '/b.pdf': 3.0}
+        client.get(f'{BASE}/a.pdf', 30, 5000)
+        client.get(f'{BASE}/b.pdf', 30, 5000)
+        a, b = client.timings
+        self.assertEqual((a.reused, a.connect_s, a.answer_s, a.size, a.status), (False, 0.5, 0.25, 2048, 200))
+        self.assertEqual((b.reused, b.connect_s, b.answer_s, b.connection), (True, 0.0, 3.0, 'close'))
+        self.assertEqual(b.describe(),
+                         '3.0 s (connect 0.0, answer 3.0, body 0.0; reused connection, 0 KB, HTTP 200, '
+                         'server says "Connection: close") /b.pdf')
+
+    def test_logs_slow_requests_as_they_happen(self):
+        client = self.client({'/a.pdf': ok(), '/b.pdf': ok()})
+        self.server.answer_s = {'/b.pdf': 2.0}
+        lines = []
+        client.slow_log = lines.append
+        client.get(f'{BASE}/a.pdf', 30, 100)
+        client.get(f'{BASE}/b.pdf', 30, 100)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith('  slow request: 2.0 s'), lines[0])
+        self.assertTrue(lines[0].endswith('/b.pdf'), lines[0])
+
+    def test_summary_counts_connections_retries_and_closes(self):
+        stale = http.client.RemoteDisconnected('closed')
+        client = self.client({'/a.pdf': ok(), '/b.pdf': [stale, lambda: FakeResponse(200, b'B', {'Connection': 'close'})]})
+        self.server.connect_s = 1.0
+        client.get(f'{BASE}/a.pdf', 30, 100)
+        client.get(f'{BASE}/b.pdf', 30, 100)
+        lines = client.summary()
+        self.assertEqual(lines[0], 'Requests: 2 in 2.0 s (2 on new connections, 1 sent again after the server closed the connection)')
+        self.assertEqual(lines[1], '  connecting 2.0 s, waiting for answers 0.0 s, reading bodies 0.0 s')
+        self.assertEqual(lines[2], '  the server answered "Connection: close" 1 time(s)')
+        self.assertEqual(lines[3], '  slowest 2:')
+        self.assertEqual(scrape.KeepAliveClient().summary(), [])
 
     def test_close_closes_every_connection(self):
         client = self.client({'/a.pdf': [redirect('https://cms.uni-marburg.de/a.pdf'), ok()]})
