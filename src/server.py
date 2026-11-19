@@ -19,6 +19,7 @@ from datetime import timedelta
 
 import deadline
 import store
+import terms
 
 PORT = 8080
 
@@ -45,6 +46,7 @@ def jobs_payload(conn):
         item['emails'] = store.effective(row, 'emails')
         item['phones'] = store.effective(row, 'phones')
         item.update(deadline_fields(row))
+        item.update(terms_fields(row))
         out.append(item)
     return out
 
@@ -67,6 +69,32 @@ def deadline_fields(row):
         'deadline_kind': dl.kind,
         'deadline_iso': iso,
         'deadline_days': dl.days,
+    }
+
+
+def terms_fields(row):
+    """Contract duration in months and hours per month, as numbers (see terms.py).
+
+    None means unknown. *_estimate marks values counted from a guess (first seen,
+    semester dates, a range, weekly or total hours); *_basis is the sentence the
+    dashboard shows as the tooltip. hours_total is set when the ad gives total
+    hours, so the dashboard can spread them over a duration a council member enters.
+    """
+    full_text = row['full_text'] or ''
+    dur = terms.duration(store.effective(row, 'duration_of_contract'), full_text,
+                         store.effective(row, 'position_start_date'), store.first_seen_date(row),
+                         trust_value=store.has_override(row, 'duration_of_contract'))
+    hrs = terms.hours(store.effective(row, 'workload'), full_text, dur.months,
+                      trust_value=store.has_override(row, 'workload'))
+    return {
+        'duration_months': dur.months,
+        'duration_estimate': dur.estimate,
+        'duration_permanent': dur.permanent,
+        'duration_basis': dur.basis,
+        'hours_per_month': hrs.per_month,
+        'hours_estimate': hrs.estimate,
+        'hours_total': hrs.total,
+        'hours_basis': hrs.basis,
     }
 
 
