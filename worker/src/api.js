@@ -1,4 +1,4 @@
-// Logic for the hosted dashboard Worker: Access token checks, the notes/tags/review/deadline/fetch API,
+// Logic for the hosted dashboard Worker: Access token checks, the notes/tags/review/deadline/terms/fetch API,
 // and security headers. The entry point is index.js; see there for configuration.
 
 import { createRemoteJWKSet, jwtVerify } from 'jose';
@@ -190,18 +190,20 @@ const NOTE_COLUMNS = 'id, job_hash, author, text, created_at, updated_at';
 
 const REVIEW_COLUMNS = 'job_hash, needs_review, set_by, set_at';
 const DEADLINE_COLUMNS = 'job_hash, kind, deadline, set_by, set_at';
+const TERM_COLUMNS = 'job_hash, field, value, set_by, set_at';
 
 async function getAnnotations({ env }) {
-  const [notes, tags, jobTags, reviewFlags, deadlines] = await env.DB.batch([
+  const [notes, tags, jobTags, reviewFlags, deadlines, terms] = await env.DB.batch([
     env.DB.prepare(`SELECT ${NOTE_COLUMNS} FROM notes ORDER BY created_at, id`),
     env.DB.prepare('SELECT id, name FROM tags ORDER BY name_key'),
     env.DB.prepare('SELECT job_hash, tag_id FROM job_tags'),
     env.DB.prepare(`SELECT ${REVIEW_COLUMNS} FROM review_flags`),
     env.DB.prepare(`SELECT ${DEADLINE_COLUMNS} FROM deadline_overrides`),
+    env.DB.prepare(`SELECT ${TERM_COLUMNS} FROM term_overrides`),
   ]);
   return json({
     notes: notes.results, tags: tags.results, job_tags: jobTags.results, review_flags: reviewFlags.results,
-    deadlines: deadlines.results,
+    deadlines: deadlines.results, terms: terms.results,
   });
 }
 
@@ -334,6 +336,44 @@ async function resetDeadline(ctx) {
   return json({ ok: true });
 }
 
+// ---------- Contract duration and hours per month ----------
+
+/** The largest value accepted per field: 10 years, and a little above a full-time month (173 h). */
+export const TERM_MAX = { duration: 120, hours: 250 };
+
+/** A positive number up to TERM_MAX[field], rounded to one decimal; null otherwise. */
+export function cleanTerm(field, value) {
+  if (!Object.hasOwn(TERM_MAX, field) || typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const rounded = Math.round(value * 10) / 10;
+  if (rounded <= 0 || rounded > TERM_MAX[field]) return null;
+  return rounded;
+}
+
+/** Replaces the detected duration or hours of one ad; anyone on the council may change it. */
+async function setTerm(ctx) {
+  const { env, email, now, params: [hash, field], body } = ctx;
+  const value = cleanTerm(field, body.value);
+  if (value === null) {
+    const unit = field === 'duration' ? 'months' : 'hours per month';
+    return fail(400, `Enter a number above 0 and up to ${TERM_MAX[field]} ${unit}.`);
+  }
+  if (!(await countWrite(ctx))) return writeLimitReached();
+  const term = await env.DB.prepare(
+    `INSERT INTO term_overrides (job_hash, field, value, set_by, set_at) VALUES (?1, ?2, ?3, ?4, ?5)
+     ON CONFLICT (job_hash, field) DO UPDATE SET value = ?3, set_by = ?4, set_at = ?5
+     RETURNING ${TERM_COLUMNS}`,
+  ).bind(hash, field, value, email, now.toISOString()).first();
+  return json({ term });
+}
+
+/** Goes back to the value detected from the ad. */
+async function resetTerm(ctx) {
+  const { env, params: [hash, field] } = ctx;
+  if (!(await countWrite(ctx))) return writeLimitReached();
+  await env.DB.prepare('DELETE FROM term_overrides WHERE job_hash = ? AND field = ?').bind(hash, field).run();
+  return json({ ok: true });
+}
+
 // ---------- Fetch button ----------
 
 function fetchConfig(env) {
@@ -446,6 +486,8 @@ const ROUTES = [
   ['PUT', /^\/api\/jobs\/([0-9a-f]{16})\/review$/, setReview],
   ['PUT', /^\/api\/jobs\/([0-9a-f]{16})\/deadline$/, setDeadline],
   ['DELETE', /^\/api\/jobs\/([0-9a-f]{16})\/deadline$/, resetDeadline],
+  ['PUT', /^\/api\/jobs\/([0-9a-f]{16})\/(duration|hours)$/, setTerm],
+  ['DELETE', /^\/api\/jobs\/([0-9a-f]{16})\/(duration|hours)$/, resetTerm],
   ['GET', /^\/api\/fetch-status$/, getFetchStatus],
   ['POST', /^\/api\/fetch$/, startFetch],
 ];

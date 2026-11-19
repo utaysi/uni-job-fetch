@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { SignJWT, generateKeyPair, exportJWK, createLocalJWKSet } from 'jose';
 import {
-  handleApi, verifyAccessToken, berlinDay, cleanTag, cleanNote, cleanDeadline, secure, isAdmin, WRITE_CAP,
+  handleApi, verifyAccessToken, berlinDay, cleanTag, cleanNote, cleanDeadline, cleanTerm, secure, isAdmin, WRITE_CAP,
 } from '../src/api.js';
 import worker from '../src/index.js';
 
@@ -370,6 +370,62 @@ test('cleanDeadline', () => {
   assert.deepEqual(cleanDeadline({ kind: 'none' }), { kind: 'none', deadline: null });
   assert.deepEqual(cleanDeadline({ kind: 'date', date: '2028-02-29' }), { kind: 'date', deadline: '2028-02-29' });
   assert.equal(cleanDeadline({ kind: 'date', date: '2027-02-29' }), null);
+});
+
+// ---------- Contract duration and hours per month ----------
+
+test('terms: set duration and hours, change one, reset one', async () => {
+  assert.deepEqual((await annotations()).terms, []);
+  const dur = await call('PUT', `/api/jobs/${HASH}/duration`, { value: 6 });
+  assert.equal(dur.status, 200);
+  assert.deepEqual(dur.data.term, {
+    job_hash: HASH, field: 'duration', value: 6, set_by: ALICE, set_at: '2026-11-16T10:00:00.000Z',
+  });
+  const later = new Date('2026-11-16T11:00:00Z');
+  const hrs = await call('PUT', `/api/jobs/${HASH}/hours`, { value: 39.46 }, BOB, {}, later);
+  assert.deepEqual(hrs.data.term, {
+    job_hash: HASH, field: 'hours', value: 39.5, set_by: BOB, set_at: '2026-11-16T11:00:00.000Z',
+  });
+  const changed = await call('PUT', `/api/jobs/${HASH}/duration`, { value: 12 }, BOB, {}, later);
+  assert.equal(changed.data.term.value, 12);
+  assert.equal(changed.data.term.set_by, BOB);
+  await call('PUT', `/api/jobs/${HASH2}/hours`, { value: 40 });
+  assert.equal((await annotations()).terms.length, 3);
+  assert.equal((await call('DELETE', `/api/jobs/${HASH}/duration`)).status, 200);
+  const left = (await annotations()).terms.map(t => `${t.job_hash}/${t.field}`).sort();
+  assert.deepEqual(left, [`${HASH}/hours`, `${HASH2}/hours`]);
+  // Resetting a field without a correction is fine too.
+  assert.equal((await call('DELETE', `/api/jobs/${HASH}/duration`)).status, 200);
+});
+
+test('terms: validation, unknown fields, origin check and write cap', async () => {
+  const bad = [{}, { value: '6' }, { value: 0 }, { value: -3 }, { value: 0.04 }, { value: 121 }, { value: null },
+    { value: [6] }, { value: true }];
+  for (const body of bad) {
+    assert.equal((await call('PUT', `/api/jobs/${HASH}/duration`, body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/hours`, { value: 251 })).status, 400);
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/hours`, '{"value": 1e999}')).status, 400);
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/pay`, { value: 6 })).status, 404);
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/Duration`, { value: 6 })).status, 404);
+  assert.equal((await call('POST', `/api/jobs/${HASH}/duration`, { value: 6 })).status, 405);
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/hours`, { value: 6 }, ALICE, { origin: 'https://evil.example' })).status, 403);
+  assert.equal((await call('DELETE', `/api/jobs/${HASH}/hours`, undefined, ALICE, { origin: null })).status, 403);
+  assert.deepEqual((await annotations()).terms, []);
+  const now = new Date('2026-11-16T10:00:00Z');
+  env.DB.db.prepare('INSERT INTO write_counts (email, day, n) VALUES (?, ?, ?)').run(ALICE, berlinDay(now), WRITE_CAP);
+  assert.equal((await call('PUT', `/api/jobs/${HASH}/duration`, { value: 6 })).status, 429);
+  assert.equal((await call('DELETE', `/api/jobs/${HASH}/duration`)).status, 429);
+});
+
+test('cleanTerm', () => {
+  assert.equal(cleanTerm('duration', 120), 120);
+  assert.equal(cleanTerm('duration', 0.05), 0.1);
+  assert.equal(cleanTerm('hours', 173.33), 173.3);
+  assert.equal(cleanTerm('hours', Infinity), null);
+  assert.equal(cleanTerm('hours', NaN), null);
+  assert.equal(cleanTerm('toString', 5), null);
+  assert.equal(cleanTerm('__proto__', 5), null);
 });
 
 // ---------- Write cap ----------
