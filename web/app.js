@@ -22,7 +22,16 @@ const SORT_OPTIONS = [
   ['deadline', 'Deadline soonest'],
   ['title', 'Title A-Z'],
   ['department', 'Department A-Z'],
+  ['shortest', 'Shortest contract'],
+  ['longest', 'Longest contract'],
+  ['fewest_hours', 'Fewest hours'],
+  ['most_hours', 'Most hours'],
 ];
+// Contract duration and hours per month: detected by src/terms.py, correctable on the hosted board.
+const TERMS = {
+  duration: { label: 'Duration', unit: 'mo', long: 'months', max: 120, aria: 'Contract duration in months' },
+  hours: { label: 'Hours', unit: 'h/mo', long: 'hours per month', max: 250, aria: 'Hours per month' },
+};
 const FETCH_POLL_MS = 20000;
 
 let allJobs = [];
@@ -49,6 +58,8 @@ let tagIdsByJob = new Map();
 let reviewByJob = new Map();
 // Deadlines corrected by council members; they replace the detected deadline.
 let deadlineEdits = new Map();
+// Durations and hours entered by council members, per field; they replace the detected values.
+let termEdits = { duration: new Map(), hours: new Map() };
 const expanded = new Set();
 const editingNotes = new Set();
 
@@ -173,6 +184,97 @@ function deadlineView(j) {
   const d = edit.kind === 'date' ? parseDate(edit.deadline) : null;
   if (d) return { text: formatDate(edit.deadline), status: deadlineStatus(d), title, edited: true };
   return { text: 'No deadline', open: true, title, edited: true };
+}
+
+// ---------- Contract duration and hours ----------
+
+const round1 = x => Math.round(x * 10) / 10;
+const numberOrNull = x => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+
+// The value detected from the ad: {value, estimate, permanent, basis}. value is null when unknown.
+// Data built before the detection existed has none of these fields, so everything is unknown.
+function detectedTerm(j, field) {
+  if (field === 'duration') {
+    if (j.duration_permanent) return { value: null, permanent: true, basis: j.duration_basis || '' };
+    return { value: numberOrNull(j.duration_months), estimate: Boolean(j.duration_estimate), basis: j.duration_basis || '' };
+  }
+  // Total hours ("88 Std. insgesamt") are spread over the duration, also one a council member entered.
+  const durationEdit = termEdits.duration.get(j.hash);
+  const total = numberOrNull(j.hours_total);
+  if (durationEdit && total) {
+    return {
+      value: round1(total / durationEdit.value), estimate: true,
+      basis: `The ad gives ${total} hours in total, spread over the ${durationEdit.value} months entered by ${displayName(durationEdit.set_by)}.`,
+    };
+  }
+  return { value: numberOrNull(j.hours_per_month), estimate: Boolean(j.hours_estimate), basis: j.hours_basis || '' };
+}
+
+// The value to work with: a council member's entry if there is one.
+function termInfo(j, field) {
+  const edit = termEdits[field].get(j.hash);
+  return edit ? { value: edit.value, edit } : detectedTerm(j, field);
+}
+
+// The number shown on the card. Filters and sorting use it too, so they always agree with
+// what people see: estimates are rounded to whole numbers, a permanent post counts as endless.
+function termNumber(info) {
+  if (info.permanent) return Infinity;
+  if (info.value === null) return null;
+  return info.estimate && info.value >= 1 ? Math.round(info.value) : round1(info.value);
+}
+
+function formatTerm(info, field) {
+  if (info.permanent) return 'Permanent';
+  const n = termNumber(info);
+  return n === null ? `? ${TERMS[field].unit}` : `${info.estimate ? '~' : ''}${n} ${TERMS[field].unit}`;
+}
+
+// The detected value in words, for the opened ad and tooltips.
+function detectedText(j, field) {
+  const d = detectedTerm(j, field);
+  return d.value === null && !d.permanent ? 'not found' : formatTerm(d, field);
+}
+
+function termTitle(j, field, info) {
+  if (info.edit) {
+    return `Set by ${displayName(info.edit.set_by)}, ${formatInstant(info.edit.set_at)}. Detected from the ad: ${detectedText(j, field)}.`;
+  }
+  const hint = me && info.value === null && !info.permanent ? ' Open the ad to enter it.' : '';
+  return info.basis + hint;
+}
+
+function termSpan(j, field) {
+  const info = termInfo(j, field);
+  const unknown = info.value === null && !info.permanent;
+  return `<span class="term${unknown ? ' unknown' : ''}" title="${esc(termTitle(j, field, info))}">${esc(formatTerm(info, field))}${info.edit ? ' &#9998;' : ''}</span>`;
+}
+
+// Sort by duration or hours; ads without a value always go last.
+function byTerm(field, dir) {
+  return (a, b) => {
+    const na = termNumber(termInfo(a, field));
+    const nb = termNumber(termInfo(b, field));
+    if (na === null || nb === null) return (na === null) - (nb === null) || byFirstSeen(a, b);
+    return (na === nb ? 0 : (na < nb ? -dir : dir)) || byFirstSeen(a, b);
+  };
+}
+
+// The Contract filters: {min, max, unknown}; min and max are null when empty.
+function termRange(field) {
+  const read = id => {
+    const raw = $(id).value.trim();
+    const n = raw === '' ? NaN : Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  return { min: read(`${field}Min`), max: read(`${field}Max`), unknown: $(`${field}Unknown`).checked };
+}
+
+function inTermRange(j, field, range) {
+  if (range.min === null && range.max === null) return true;
+  const n = termNumber(termInfo(j, field));
+  if (n === null) return range.unknown;
+  return (range.min === null || n >= range.min) && (range.max === null || n <= range.max);
 }
 
 function needsReview(j) {
@@ -384,6 +486,10 @@ function sortJobs(jobs) {
     },
     title: (a, b) => text(jobTitle(a), jobTitle(b)) || byFirstSeen(a, b),
     department: (a, b) => text(a.department || 'Unknown', b.department || 'Unknown') || byFirstSeen(a, b),
+    shortest: byTerm('duration', 1),
+    longest: byTerm('duration', -1),
+    fewest_hours: byTerm('hours', 1),
+    most_hours: byTerm('hours', -1),
   }[sortBy] || byFirstSeen;
   return jobs.slice().sort(compare);
 }
@@ -409,10 +515,13 @@ function getFilteredJobs() {
   const search = $('searchInput').value.toLowerCase().trim();
   const dateFrom = $('dateFrom').value;
   const dateTo = $('dateTo').value;
+  const durationRange = termRange('duration');
+  const hoursRange = termRange('hours');
 
   return allJobs.filter(j => {
     if (!activeSources.has(j.department || 'Unknown')) return false;
     if (!jobMatchesStatus(j)) return false;
+    if (!inTermRange(j, 'duration', durationRange) || !inTermRange(j, 'hours', hoursRange)) return false;
 
     // Tag chips and "No tags" combine with OR: an ad shows if it matches any of them.
     if (activeTags.size || filterUntagged) {
@@ -512,6 +621,29 @@ function deadlineEditHtml(j) {
     ${who}`;
 }
 
+// Enter the duration or hours by hand, or go back to the detected value.
+function termEditHtml(j, field) {
+  const t = TERMS[field];
+  const edit = termEdits[field].get(j.hash);
+  const detected = detectedTerm(j, field);
+  const current = edit ? edit.value : (detected.value === null ? '' : round1(detected.value));
+  const who = edit
+    ? `<div class="review-by">Set by <span title="${esc(edit.set_by)}">${esc(displayName(edit.set_by))}</span>, ${esc(formatInstant(edit.set_at))}.
+         <button class="link-btn" type="button" data-action="term-reset" data-field="${esc(field)}">Use detected</button></div>`
+    : '';
+  return `
+    <div class="term-edit">
+      <div class="detected">${esc(t.label)} detected: ${esc(detectedText(j, field))}</div>
+      ${detected.basis ? `<div class="term-basis">${esc(detected.basis)}</div>` : ''}
+      <form class="inline-form term-form" data-action="set-term" data-field="${esc(field)}">
+        <input type="number" name="value" value="${esc(current)}" min="0.1" max="${t.max}" step="any" required aria-label="${esc(t.aria)}">
+        <span class="term-unit">${esc(t.long)}</span>
+        <button class="action-btn small" type="submit">Save</button>
+      </form>
+      ${who}
+    </div>`;
+}
+
 function detailsHtml(j) {
   const notes = notesByJob.get(j.hash) || [];
   const tagIds = tagIdsByJob.get(j.hash) || [];
@@ -520,6 +652,9 @@ function detailsHtml(j) {
       <section class="details-block">
         <h4>Deadline</h4>
         ${deadlineEditHtml(j)}
+        <h4 class="spaced">Contract</h4>
+        ${termEditHtml(j, 'duration')}
+        ${termEditHtml(j, 'hours')}
         <h4 class="spaced">Review</h4>
         ${reviewHtml(j)}
         <h4 class="spaced">Tags</h4>
@@ -577,6 +712,8 @@ function cardHtml(j, i, animate) {
         ${dl.status ? `<span class="deadline-status ${dl.status.cls}">${esc(dl.status.text)}</span>` : ''}
         <span class="date-label">First seen</span>
         <span class="seen-date"${j.first_seen ? ` title="First found by a fetch on ${esc(formatBerlinStamp(j.first_seen))} (Berlin time)"` : ''}>${esc(seen)}</span>
+        <span class="date-label">Contract</span>
+        <span class="terms">${termSpan(j, 'duration')}<span class="terms-sep">&middot;</span>${termSpan(j, 'hours')}</span>
       </div>
       <div class="job-actions">
         ${pdf ? `<a class="action-btn small" href="${esc(pdf)}" target="_blank" rel="noopener noreferrer">PDF</a>` : ''}
@@ -768,6 +905,10 @@ async function loadAnnotations() {
   tagIdsByJob = new Map();
   reviewByJob = new Map((data.review_flags || []).map(r => [r.job_hash, r]));
   deadlineEdits = new Map((data.deadlines || []).map(d => [d.job_hash, d]));
+  termEdits = { duration: new Map(), hours: new Map() };
+  (data.terms || []).forEach(t => {
+    if (t.field === 'duration' || t.field === 'hours') termEdits[t.field].set(t.job_hash, t);
+  });
   (data.tags || []).forEach(t => tagsById.set(t.id, t));
   (data.notes || []).forEach(n => {
     if (!notesByJob.has(n.job_hash)) notesByJob.set(n.job_hash, []);
@@ -829,6 +970,12 @@ function setupHostedHandlers() {
             await afterChange(hash);
           });
           return;
+        case 'term-reset':
+          runAction(action, async () => {
+            await api('DELETE', `api/jobs/${hash}/${action.dataset.field}`);
+            await afterChange(hash);
+          });
+          return;
         case 'set-review':
         case 'clear-review':
           runAction(action, async () => {
@@ -881,6 +1028,15 @@ function setupHostedHandlers() {
         if (!date) return;
         runAction(button, async () => {
           await api('PUT', `api/jobs/${hash}/deadline`, { kind: 'date', date });
+          await afterChange(hash);
+        });
+        return;
+      }
+      case 'set-term': {
+        const value = Number(form.elements.value.value);
+        if (!Number.isFinite(value) || value <= 0) return;
+        runAction(button, async () => {
+          await api('PUT', `api/jobs/${hash}/${form.dataset.field}`, { value });
           await afterChange(hash);
         });
         return;
@@ -1141,6 +1297,8 @@ async function init() {
 $('searchInput').addEventListener('input', render);
 $('dateFrom').addEventListener('change', render);
 $('dateTo').addEventListener('change', render);
+['durationMin', 'durationMax', 'hoursMin', 'hoursMax'].forEach(id => $(id).addEventListener('input', render));
+['durationUnknown', 'hoursUnknown'].forEach(id => $(id).addEventListener('change', render));
 
 $('sortChips').addEventListener('click', e => {
   const chip = e.target.closest('[data-sort]');
@@ -1154,6 +1312,8 @@ $('clearFilters').addEventListener('click', () => {
   $('searchInput').value = '';
   $('dateFrom').value = '';
   $('dateTo').value = '';
+  ['durationMin', 'durationMax', 'hoursMin', 'hoursMax'].forEach(id => { $(id).value = ''; });
+  ['durationUnknown', 'hoursUnknown'].forEach(id => { $(id).checked = true; });
   activeSources.clear();
   selectAllSources();
   updateSourceChips();

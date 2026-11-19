@@ -291,6 +291,67 @@ body {
   border-color: var(--accent);
 }
 
+/* Contract filters: a min and max box per value, both ends included. */
+.range-filters {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.range {
+  border: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.range legend {
+  margin-bottom: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.range-row input,
+.term-form input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  outline: none;
+  color-scheme: dark;
+  transition: var(--transition);
+}
+
+.range-row input:focus { border-color: var(--accent); }
+
+.range-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.range-check input { accent-color: var(--accent); }
+
 .clear-btn {
   margin: 0.5rem 0.75rem 0.75rem;
   padding: 0.4rem 0.75rem;
@@ -591,6 +652,19 @@ body {
   white-space: nowrap;
 }
 
+/* Contract duration and hours per month, under the dates. */
+.terms {
+  grid-column: span 2;
+  font-size: 0.8125rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.term.unknown { color: var(--text-muted); }
+.terms-sep { margin: 0 0.3rem; color: var(--text-muted); }
+
 .deadline-future { color: var(--green); }
 .deadline-soon { color: var(--orange); }
 .deadline-past { color: var(--red); }
@@ -841,6 +915,13 @@ body {
 }
 
 .deadline-form { flex-wrap: wrap; align-items: center; }
+
+/* Duration and hours in the opened card */
+.term-edit + .term-edit { margin-top: 0.75rem; }
+.term-basis { margin-top: 0.15rem; font-size: 0.6875rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.term-form { align-items: center; }
+.term-form input[type="number"] { flex: 0 1 6rem; }
+.term-unit { font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; }
 .deadline-form input[type="date"] { flex: 0 1 10rem; color-scheme: dark; }
 
 .job-details {
@@ -1021,6 +1102,30 @@ body {
     <div class="panel">
       <div class="panel-header">Status</div>
       <div class="fetch-chips" id="fetchChips"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">Contract</div>
+      <div class="range-filters">
+        <fieldset class="range">
+          <legend>Duration (months)</legend>
+          <div class="range-row">
+            <input type="number" id="durationMin" min="0" step="any" inputmode="decimal" placeholder="Min" aria-label="Minimum duration in months">
+            <span>to</span>
+            <input type="number" id="durationMax" min="0" step="any" inputmode="decimal" placeholder="Max" aria-label="Maximum duration in months">
+          </div>
+          <label class="range-check"><input type="checkbox" id="durationUnknown" checked> Include ads without a value</label>
+        </fieldset>
+        <fieldset class="range">
+          <legend>Hours per month</legend>
+          <div class="range-row">
+            <input type="number" id="hoursMin" min="0" step="any" inputmode="decimal" placeholder="Min" aria-label="Minimum hours per month">
+            <span>to</span>
+            <input type="number" id="hoursMax" min="0" step="any" inputmode="decimal" placeholder="Max" aria-label="Maximum hours per month">
+          </div>
+          <label class="range-check"><input type="checkbox" id="hoursUnknown" checked> Include ads without a value</label>
+        </fieldset>
+      </div>
     </div>
 
     <div class="panel">
