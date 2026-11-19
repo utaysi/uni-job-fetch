@@ -118,7 +118,7 @@ path to `src\jobs.py` is correct.
 
 The dashboard can be hosted at an address like `board.example.org`, so that staff council members can open it from anywhere after logging in. Nothing runs on your own server: GitHub runs the daily fetch, and Cloudflare serves the page and handles the login. Both are used within their free plans.
 
-To keep each run short (GitHub Actions minutes are limited on private repos), the fetcher keeps one connection open per server for all pages and PDFs, instead of opening a new one per request. The university's servers delay new connections that arrive in quick succession (1 to 5 seconds each), which made the fetch step take 2 to 6 minutes; over one connection the same requests take a few seconds.
+To keep each run short (GitHub Actions minutes are limited on private repos), the fetcher keeps one connection open per server for all pages and PDFs, instead of opening a new one per request. The university's servers delay new connections that arrive in quick succession (1 to 5 seconds each), which made the fetch step take 2 to 6 minutes; over one connection the same requests take a few seconds. The fetch log lists every request slower than 1 second as it happens (time spent connecting, waiting for the answer and reading the body, and whether the connection was reused), and ends with a summary of where the request time went, so a slow run shows whether the university's servers or the network are the cause, even when the workflow's 10-minute limit stops it.
 
 The hosted version adds features the local dashboard does not have:
 
