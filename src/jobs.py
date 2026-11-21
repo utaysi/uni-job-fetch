@@ -2,7 +2,8 @@
 """Uni Marburg student job fetcher.
 
 A unified, deduplicated repository of job-ad PDFs. Each ad is identified by the
-content hash of its PDF, stored once in `pdfs/`, with structured fields extracted
+content hash of its PDF (for the central job board's web-page ads, of the cleaned
+page, see posting.py), stored once in `pdfs/`, with structured fields extracted
 into a SQLite database (jobs.db).
 
 Run with no arguments for an interactive menu, or use a subcommand directly:
@@ -27,6 +28,7 @@ from datetime import date
 import deadline
 import exporter
 import extract
+import posting
 import scrape
 import server
 import store
@@ -135,6 +137,7 @@ def cmd_fetch(args):
     errors = 0
     seen_at = store.now_iso()
     today = date.fromisoformat(store.today())
+    saver = posting.Saver(log)
 
     for i, ad in enumerate(ads, 1):
         known_hash = unchanged_hash(conn, ad['url'], today)
@@ -150,12 +153,22 @@ def cmd_fetch(args):
             print(f"  [{i}/{len(ads)}] ERROR downloading {ad['url']}: {e}")
             errors += 1
             continue
-        if not data[:4] == b'%PDF':
+        page = None
+        if ad.get('posting'):
+            try:
+                page = posting.read(data.decode('utf-8', errors='replace'))
+            except ValueError as e:
+                print(f"  [{i}/{len(ads)}] skipped ({e}): {ad['url']}")
+                errors += 1
+                continue
+            hash_ = page.hash
+        elif data[:4] == b'%PDF':
+            hash_ = hashlib.sha256(data).hexdigest()[:16]
+        else:
             print(f"  [{i}/{len(ads)}] skipped (not a PDF): {ad['url']}")
             errors += 1
             continue
 
-        hash_ = hashlib.sha256(data).hexdigest()[:16]
         seen_hashes.add(hash_)
         store.remember_url(conn, ad['url'], hash_, len(data), seen_at)
 
@@ -168,6 +181,10 @@ def cmd_fetch(args):
         count = store.next_count_for_date(conn, date_str)
         filename = f'{date_str}_{_sanitize(ad["original_name"])}_{count}.pdf'
         path = os.path.join(PDF_DIR, filename)
+        how = ''
+        if page is not None:
+            data, how = saver.pdf(ad['url'], page)
+            how = ' (printed)' if how == 'printed' else ' (plain PDF)'
         with open(path, 'wb') as f:
             f.write(data)
 
@@ -183,7 +200,7 @@ def cmd_fetch(args):
         store.insert_job(conn, hash_, fields, ad['original_name'], count, filename, seen_at)
         new_count += 1
         flag = ' [REVIEW]' if fields.get('needs_review') else ''
-        print(f"  [{i}/{len(ads)}] NEW {filename}{flag}")
+        print(f"  [{i}/{len(ads)}] NEW {filename}{how}{flag}")
 
     scrape.close()
     print()

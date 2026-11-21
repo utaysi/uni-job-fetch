@@ -267,9 +267,9 @@ def check_print(data, posting):
 class Saver:
     """Saves postings as PDFs during one fetch: printed when possible, else plain."""
 
-    def __init__(self, log, browser=find_browser):
+    def __init__(self, log, browser=None):
         self._log = log
-        self._find = browser
+        self._find = browser or find_browser  # a function that finds the browser
         self._browser = None
         self._looked = False
 

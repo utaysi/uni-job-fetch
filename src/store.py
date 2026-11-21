@@ -1,7 +1,8 @@
 """SQLite data layer for the job-ad repository.
 
 The database (jobs.db) is the single source of truth. Identity is the content
-hash of the PDF bytes. Parsed fields are stored as columns; manual corrections
+hash of the PDF bytes (for the central job board's web-page ads, of the cleaned
+page, see posting.py). Parsed fields are stored as columns; manual corrections
 live in a JSON `overrides` column so a fix is never stomped and we can always
 tell "parsed" from "fixed". `effective_*` helpers merge the two.
 """

@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -315,6 +316,87 @@ class Client(unittest.TestCase):
         client.get(f'{BASE}/a.pdf', 30, 100)
         client.close()
         self.assertTrue(all(c.closed for c in self.server.connections))
+
+
+
+def answer(postings, total=None, offset=0):
+    """A search answer of the job API, with BITE's own names for two department codes."""
+    return ok(json.dumps({
+        'jobPostings': postings,
+        'fields': {'custom.fachbereich': {'options': [{'value': 'M20', 'label': 'FB 20 Medizin'},
+                                                      {'value': 'M62', 'label': 'Studienkolleg Mittelhessen'}]}},
+        'page': {'offset': offset, 'total': len(postings) if total is None else total},
+    }).encode())
+
+
+def ad(n, dept='M20', url=None):
+    return {'id': f'id{n}', 'identification': f'fb20-000{n}-shk-2026', 'custom': {'fachbereich': dept},
+            'url': url or f'https://stellenangebote.uni-marburg.de/jobposting/id{n}'}
+
+
+class CentralJobBoard(unittest.TestCase):
+    def search(self, routes):
+        self.server = FakeServer({'/api/v1/postings/search': routes})
+        client = scrape.KeepAliveClient(connect=self.server.connect, clock=self.server.clock)
+        self.lines = []
+        return scrape.search_postings(self.lines.append, client=client)
+
+    def sent(self):
+        return [json.loads(b) for c in self.server.connections for b in c.bodies]
+
+    def test_asks_for_student_jobs_and_reads_each_ad(self):
+        ads = self.search([answer([ad(1), ad(2, 'M62'), ad(3, 'M99'), ad(4, None)])])
+        body = self.sent()[0]
+        self.assertEqual(body['key'], scrape.JOB_API_KEY)
+        self.assertEqual(body['filter'], {'custom.zuordnung': {'in': ['04_student']}})
+        self.assertEqual(body['page'], {'num': scrape.JOB_API_PAGE_SIZE, 'offset': 0})
+        self.assertEqual(ads[0], {'href': 'https://stellenangebote.uni-marburg.de/jobposting/id1',
+                                  'department': 'Department 20 Medicine',
+                                  'original_name': 'fb20-0001-shk-2026', 'posting': True})
+        # Known codes get the subpage names, others BITE's name, unknown ones a fallback.
+        self.assertEqual([a['department'] for a in ads],
+                         ['Department 20 Medicine', 'Studienkolleg Mittelhessen', 'Central job board', 'Central job board'])
+
+    def test_reads_every_page_of_a_long_list(self):
+        with mock.patch.object(scrape, 'JOB_API_PAGE_SIZE', 2):
+            ads = self.search([answer([ad(1), ad(2)], total=3), answer([ad(3)], total=3, offset=2)])
+        self.assertEqual([b['page']['offset'] for b in self.sent()], [0, 2])
+        self.assertEqual(len(ads), 3)
+
+    def test_skips_ads_whose_link_leaves_the_university(self):
+        ads = self.search([answer([ad(1, url='https://example.org/jobposting/1'), ad(2, url='http://stellenangebote.uni-marburg.de/x'),
+                                   {'id': 'no-url'}, 'not an ad', ad(3)])])
+        self.assertEqual([a['original_name'] for a in ads], ['fb20-0003-shk-2026'])
+        self.assertEqual(len(self.lines), 4)
+
+    def test_raises_when_the_answer_has_no_list(self):
+        with self.assertRaisesRegex(ValueError, 'without a list'):
+            self.search([ok(b'{"error": "invalid key"}')])
+        with self.assertRaises(scrape.HTTPStatusError):
+            self.search([lambda: FakeResponse(403)])
+
+    def test_department_names_match_the_subpages(self):
+        subpages = {name for _, name in scrape.SUBPAGES}
+        for code, name in scrape.CENTRAL_DEPARTMENTS.items():
+            if code not in ('M20', 'M70'):  # no subpage of their own
+                self.assertIn(name, subpages, code)
+
+    def test_discover_all_keeps_going_when_the_board_fails(self):
+        lines = []
+        with mock.patch.object(scrape, 'search_postings', side_effect=TimeoutError('timed out')), \
+                mock.patch.object(scrape, 'fetch_page', return_value='<a href="/de/fb12/a.pdf">A</a>'):
+            ads = scrape.discover_all(lines.append)
+        self.assertIn('  WARNING: could not read the central job board: timed out', lines)
+        self.assertEqual(ads[0]['url'], 'https://www.uni-marburg.de/de/fb12/a.pdf')
+        self.assertFalse(any(a.get('posting') for a in ads))
+
+    def test_discover_all_lists_board_ads_first_with_checked_urls(self):
+        board = [{'href': 'https://stellenangebote.uni-marburg.de/jobposting/id1', 'department': 'D',
+                  'original_name': 'x', 'posting': True}]
+        with mock.patch.object(scrape, 'search_postings', return_value=board), \
+                mock.patch.object(scrape, 'fetch_page', return_value=None):
+            ads = scrape.discover_all(lambda line: None)
+        self.assertEqual(ads, [dict(board[0], url='https://stellenangebote.uni-marburg.de/jobposting/id1')])
 
 
 if __name__ == '__main__':

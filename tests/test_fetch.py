@@ -1,20 +1,26 @@
-"""Tests for skipping unchanged PDFs during a fetch: the size check and the weekly
-full download. Uses an in-memory database and a fake size answer, so no network.
+"""Tests for a fetch: skipping unchanged PDFs (the size check and the weekly full
+download), and a whole fetch of a central job board ad. Uses a temporary folder or an
+in-memory database and fake network answers, so no network or browser is needed.
 
 Run with: .venv/bin/python -m unittest discover -s tests
 """
 
+import io
 import os
 import sys
+import tempfile
 import unittest
 from datetime import date, timedelta
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.dirname(__file__))
 
 import jobs  # noqa: E402
+import posting  # noqa: E402
 import scrape  # noqa: E402
 import store  # noqa: E402
+from test_posting import page  # noqa: E402
 
 URL = 'https://www.uni-marburg.de/de/fb12/a.pdf'
 TODAY = date(2026, 11, 20)
@@ -105,6 +111,85 @@ class UnchangedHash(unittest.TestCase):
         store.remember_url(self.conn, URL, 'def456', 2000, '2026-11-20T06:00:00')
         row = store.known_url(self.conn, URL)
         self.assertEqual((row['hash'], row['size'], row['downloaded_at']), ('def456', 2000, '2026-11-20T06:00:00'))
+
+
+
+class FetchCentralAd(unittest.TestCase):
+    """A whole fetch of one ad of the central job board, without network or browser."""
+
+    URL = 'https://stellenangebote.uni-marburg.de/jobposting/0123456789abcdef'
+
+    def setUp(self):
+        self.cwd = os.getcwd()
+        self.tmp = tempfile.TemporaryDirectory()
+        os.chdir(self.tmp.name)
+        os.makedirs('data')
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        self.tmp.cleanup()
+
+    def fetch(self, html, size=None):
+        """Run `fetch` with the board listing one ad whose page is html; returns the output."""
+        data = html.encode('utf-8')
+        board = [{'href': self.URL, 'url': self.URL, 'department': 'Department 20 Medicine',
+                  'original_name': 'fb20-0001-shk-2026', 'posting': True}]
+        out = io.TextIOWrapper(io.BytesIO(), encoding='utf-8')
+        with mock.patch.object(scrape, 'discover_all', return_value=board), \
+                mock.patch.object(scrape, 'download', return_value=data) as self.download, \
+                mock.patch.object(scrape, 'size', return_value=len(data) if size is None else size), \
+                mock.patch.object(scrape, 'close'), mock.patch.object(scrape, 'timing_summary', return_value=[]), \
+                mock.patch.object(posting, 'find_browser', return_value=None), \
+                mock.patch.object(sys, 'stdout', out):
+            self.assertEqual(jobs.cmd_fetch(None), 0)
+        out.flush()
+        return out.buffer.getvalue().decode('utf-8')
+
+    def rows(self):
+        conn = store.connect()
+        try:
+            return [dict(r) for r in conn.execute('SELECT * FROM jobs ORDER BY first_seen, rowid')]
+        finally:
+            conn.close()
+
+    def test_new_ad_is_saved_as_a_pdf_and_read(self):
+        output = self.fetch(page())
+        self.assertIn('no browser found', output)
+        self.assertRegex(output, r'NEW \S+_fb20-0001-shk-2026_1\.pdf \(plain PDF\)')
+        [row] = self.rows()
+        self.assertEqual(row['hash'], posting.read(page()).hash)
+        self.assertEqual((row['job_id'], row['department'], row['status']),
+                         ('fb20-0001-shk-2026', 'Department 20 Medicine', 'Online'))
+        self.assertEqual((row['application_deadline_iso'], row['duration_of_contract'], row['workload']),
+                         ('2026-11-29', '1 Jahr', '40 Std./Monat'))
+        with open(os.path.join('data', 'pdfs', row['pdf_filename']), 'rb') as f:
+            self.assertTrue(f.read().startswith(b'%PDF'))
+        conn = store.connect()
+        self.assertEqual(store.known_url(conn, self.URL)['size'], len(page().encode('utf-8')))
+        conn.close()
+
+    def test_same_ad_again_is_not_new(self):
+        self.fetch(page())
+        output = self.fetch(page())  # same size: not even downloaded
+        self.download.assert_not_called()
+        self.assertIn('not downloaded: same size', output)
+        self.fetch(page(), size=1)   # downloaded again, same content: the same ad
+        self.download.assert_called_once()
+        [row] = self.rows()
+        self.assertEqual(row['status'], 'Online')
+
+    def test_changed_ad_is_a_new_one_and_the_old_goes_offline(self):
+        self.fetch(page())
+        self.fetch(page(extra='Neu: auch remote.'), size=1)
+        old, new = self.rows()
+        self.assertEqual((old['status'], new['status']), ('Offline', 'Online'))
+        self.assertNotEqual(old['hash'], new['hash'])
+
+    def test_page_without_an_ad_is_an_error(self):
+        output = self.fetch('<html><body>Wartungsarbeiten</body></html>')
+        self.assertIn('skipped (not a job posting page', output)
+        self.assertIn('Errors/skipped: 1', output)
+        self.assertEqual(self.rows(), [])
 
 
 if __name__ == '__main__':

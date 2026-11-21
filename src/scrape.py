@@ -1,11 +1,11 @@
 """Scraping for Uni Marburg student/research job ads.
 
-Discovers PDF links on the main page and the department subpages, resolving each
-ad's department (subpage name, or the main-page table cell) and its original
-remote PDF basename. Downloads are returned as raw bytes for hashing/storage.
+Discovers the ads of the central job board (web pages, listed by the university's
+applicant system, see search_postings) and the PDF links on the department
+subpages, with each ad's department and original name. Downloads are returned as
+raw bytes for hashing and storage.
 """
 
-import html
 import http.client
 import json
 import os
@@ -14,9 +14,6 @@ import ssl
 import time
 import urllib.parse
 from dataclasses import dataclass
-
-MAIN_URL = ('https://www.uni-marburg.de/de/universitaet/administration/verwaltung/'
-            'dezernat2/personalabteilung/bewerber/stud-und-wiss-hilfskraftstellen')
 
 SUBPAGES = [
     ('https://www.uni-marburg.de/de/fb01/fachbereich/karriere/stellenausschreibungen', 'Department 01 Law'),
@@ -49,6 +46,57 @@ SUBPAGES = [
     ('https://www.uni-marburg.de/de/mcdci/zentrum/stellenangebote', 'Marburg Center for Digital Culture and Infrastructure (MCDCI)'),
     ('https://www.uni-marburg.de/de/mcaw/aktuelles/nachrichten/eine-stelle-als-studentische-hilfskraft-zu-besetzen-20-std-monat-nachwuchsgruppe_september', 'Marburg Center for the Ancient World (MCAW)'),
 ]
+
+# The central list of student jobs. Its page (CENTRAL_PAGE) used to link PDFs; since
+# mid-2026 a script on it shows the list from the university's applicant system, made
+# by BITE, and each ad is a web page on stellenangebote.uni-marburg.de. The fetcher
+# asks BITE's search API the same question as that script. The listing key is public:
+# it is in the university's own script for the list
+# (https://cs-assets.b-ite.com/uni-marburg/jobs-api/04_student-de.js).
+CENTRAL_PAGE = ('https://www.uni-marburg.de/de/universitaet/profil/universitaetskultur/karriere/'
+                'stellenangebote/stud-und-wiss-hilfskraftstellen')
+JOB_API_SEARCH_URL = 'https://jobs.b-ite.com/api/v1/postings/search'
+JOB_API_KEY = '4f4ffc7d45c627f7536bc43030c43e5fd5d3d3f0'
+JOB_API_CATEGORY = '04_student'  # "Studentische Hilfskraftstellen"
+JOB_API_PAGE_SIZE = 100
+JOB_API_MAX_PAGES = 20
+
+# BITE's department codes, named like the subpages above, so the dashboard's
+# department filter puts an ad under the same name wherever it was posted. Other
+# codes get the name BITE gives them (in German).
+CENTRAL_DEPARTMENTS = {
+    'M01': 'Department 01 Law',
+    'M02': 'Department 02 Economics',
+    'M03': 'Department 03 Social Sciences and Philosophy',
+    'M04': 'Department 04 Psychology',
+    'M05': 'Department 05 Protestant Theology',
+    'M06': 'Department 06 History and Cultural Studies',
+    'M09': 'Department 09 German Studies and Art History',
+    'M10': 'Department 10 Foreign Language Philologies',
+    'M12': 'Department 12 Mathematics and Computer Science',
+    'M13': 'Department 13 Physics',
+    'M15': 'Department 15 Chemistry',
+    'M16': 'Department 16 Pharmacy',
+    'M17': 'Department 17 Biology',
+    'M19': 'Department 19 Geography',
+    'M20': 'Department 20 Medicine',
+    'M21': 'Department 21 Educational Sciences',
+    'M23': 'Center for Near and Middle Eastern Studies (CNMS)',
+    'M24': 'Image archive Photo Marburg',
+    'M27': 'Center for Conflict Research',
+    'M28': 'Center for Gender Studies and Feminist Futures Research',
+    'M30': 'Center for Teacher Education',
+    'M32': 'International Centre for the Study of War Crimes Trials (ICWC)',
+    'M33': 'Marburg Center for the Ancient World (MCAW)',
+    'M34': 'Future Center Microcosm Earth',
+    'M35': 'Center for Synthetic Microbiology',
+    'M39': 'Marburg Center for Digital Culture and Infrastructure (MCDCI)',
+    'M40': 'University Library',
+    'M41': 'University Computing Centre',
+    'M50': 'Botanical garden',
+    'M70': 'University Administration',
+}
+CENTRAL_FALLBACK_DEPARTMENT = 'Central job board'
 
 PDF_LINK_RE = re.compile(r'href=["\x27]([^"\x27]*\.pdf)["\x27]')
 
@@ -325,22 +373,47 @@ def original_name(href):
     return re.sub(r'\.pdf$', '', base, flags=re.IGNORECASE)
 
 
-def discover_main_page(content):
-    """Ads on the main page, with department taken from each table row's cell."""
-    ads = []
-    for row in re.findall(r'<tr[^>]*>(.*?)</tr>', content, re.DOTALL):
-        m = PDF_LINK_RE.search(row)
-        if not m:
-            continue
-        href = m.group(1)
-        cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
-        dept = ''
-        if cells:
-            dept = re.sub(r'<br\s*/?>', ' ', cells[0])
-            dept = re.sub(r'<[^>]+>', '', dept)
-            dept = re.sub(r'\s+', ' ', html.unescape(dept)).strip(' |')
-        ads.append({'href': href, 'department': dept or 'Main Page',
-                    'original_name': original_name(href)})
+def _department_names(answer):
+    """BITE's own names for its department codes, from a search answer's field list."""
+    field = ((answer.get('fields') or {}).get('custom.fachbereich') or {})
+    return {o.get('value'): o.get('label') for o in field.get('options') or [] if isinstance(o, dict)}
+
+
+def search_postings(log, client=None):
+    """The ads on the central job board, as dicts like the PDF links, with posting=True.
+
+    Each ad's url is its page on the university's server, checked like any link.
+    Raises if the search fails, so the caller can say so.
+    """
+    client = client or _client
+    ads, offset = [], 0
+    for _ in range(JOB_API_MAX_PAGES):
+        answer = client.post_json(JOB_API_SEARCH_URL, {
+            'key': JOB_API_KEY, 'channel': 0, 'locale': 'de',
+            'sort': {'by': 'createdOn', 'order': 'asc'},
+            'filter': {'custom.zuordnung': {'in': [JOB_API_CATEGORY]}},
+            'page': {'num': JOB_API_PAGE_SIZE, 'offset': offset},
+        }, 30, MAX_API_BYTES)
+        if not isinstance(answer, dict) or not isinstance(answer.get('jobPostings'), list):
+            raise ValueError('the job API answered without a list of ads')
+        names = _department_names(answer)
+        found = answer['jobPostings']
+        for item in found:
+            url = item.get('url') if isinstance(item, dict) else None
+            if not isinstance(url, str) or not is_allowed_url(url):
+                log(f'  skipped central ad with a non-university link: {url!r}')
+                continue
+            code = (item.get('custom') or {}).get('fachbereich')
+            ads.append({
+                'href': url,
+                'department': CENTRAL_DEPARTMENTS.get(code) or names.get(code) or CENTRAL_FALLBACK_DEPARTMENT,
+                'original_name': str(item.get('identification') or item.get('id') or original_name(url)),
+                'posting': True,
+            })
+        offset += len(found)
+        total = (answer.get('page') or {}).get('total')
+        if not found or not isinstance(total, int) or offset >= total:
+            break
     return ads
 
 
@@ -353,7 +426,10 @@ def discover_subpage(content, department):
 
 
 def discover_all(log):
-    """Return a list of ad dicts {href, department, original_name}, deduped by URL."""
+    """Return a list of ad dicts {href, url, department, original_name}, deduped by URL.
+
+    Ads of the central job board are web pages and carry posting=True; the others are PDFs.
+    """
     ads = []
     seen_urls = set()
 
@@ -369,10 +445,12 @@ def discover_all(log):
             it['url'] = url
             ads.append(it)
 
-    log('Fetching main page...')
-    main = fetch_page(MAIN_URL, log)
-    if main:
-        found = discover_main_page(main)
+    log('Fetching the central job board...')
+    try:
+        found = search_postings(log)
+    except Exception as e:
+        log(f'  WARNING: could not read the central job board: {e}')
+    else:
         add(found)
         log(f'  found {len(found)} ad(s)')
 
