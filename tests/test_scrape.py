@@ -6,6 +6,7 @@ Run with: .venv/bin/python -m unittest discover -s tests
 """
 
 import http.client
+import json
 import os
 import sys
 import unittest
@@ -16,7 +17,8 @@ import scrape  # noqa: E402
 
 HOST = 'www.uni-marburg.de'
 BASE = f'https://{HOST}'
-REASONS = {200: 'OK', 301: 'Moved Permanently', 302: 'Found', 403: 'Forbidden'}
+API = f'https://{scrape.JOB_API_HOST}'
+REASONS = {200: 'OK', 301: 'Moved Permanently', 302: 'Found', 401: 'Unauthorized', 403: 'Forbidden'}
 
 
 class FakeResponse:
@@ -54,15 +56,19 @@ class FakeConnection:
         self.closed = False
         self.requests = []
         self.methods = []
+        self.bodies = []
+        self.headers = []
 
     def connect(self):
         self.server.tick(self.server.connect_s)
         self.sock = FakeSocket()
 
-    def request(self, method, target, headers=None):
+    def request(self, method, target, body=None, headers=None):
         self.sock = self.sock or FakeSocket()
         self.requests.append(target)
         self.methods.append(method)
+        self.bodies.append(body)
+        self.headers.append(headers or {})
         self._target = target
 
     def getresponse(self):
@@ -262,6 +268,47 @@ class Client(unittest.TestCase):
             client.head(f'{BASE}/away.pdf', 30)
         with self.assertRaisesRegex(ValueError, 'non-university'):
             client.head('https://example.org/a.pdf', 30)
+
+    def test_post_json_sends_json_and_decodes_the_answer(self):
+        client = self.client({'/api/v1/postings/search': ok(b'{"jobPostings": []}')})
+        answer = client.post_json(f'{API}/api/v1/postings/search', {'locale': 'de'}, 30, 1000)
+        self.assertEqual(answer, {'jobPostings': []})
+        conn = self.server.connections[0]
+        self.assertEqual(conn.host, scrape.JOB_API_HOST)
+        self.assertEqual(conn.methods, ['POST'])
+        self.assertEqual(json.loads(conn.bodies[0]), {'locale': 'de'})
+        self.assertEqual(conn.headers[0]['Content-Type'], 'application/json')
+        self.assertEqual(client.timings[0].method, 'POST')
+
+    def test_post_json_only_goes_to_the_job_api(self):
+        client = self.client({})
+        for url in (f'{BASE}/api', f'http://{scrape.JOB_API_HOST}/api', 'https://example.org/api',
+                    f'https://{scrape.JOB_API_HOST}.example.org/api', f'https://{scrape.JOB_API_HOST}:8443/api',
+                    f'https://x.{scrape.JOB_API_HOST}/api'):
+            with self.assertRaisesRegex(ValueError, 'job API'):
+                client.post_json(url, {}, 30, 1000)
+        self.assertEqual(self.server.connections, [])
+
+    def test_get_and_head_still_refuse_the_job_api_host(self):
+        client = self.client({})
+        with self.assertRaisesRegex(ValueError, 'non-university'):
+            client.get(f'{API}/api/v1/postings/search', 30, 1000)
+        with self.assertRaisesRegex(ValueError, 'non-university'):
+            client.head(f'{API}/api/v1/postings/search', 30)
+        self.assertEqual(self.server.connections, [])
+
+    def test_post_json_follows_no_redirect(self):
+        client = self.client({'/api': redirect(f'{BASE}/api')})
+        with self.assertRaisesRegex(ValueError, 'redirect'):
+            client.post_json(f'{API}/api', {}, 30, 1000)
+        self.assertEqual(self.server.connections[0].requests, ['/api'])
+
+    def test_post_json_errors_and_size_cap(self):
+        client = self.client({'/denied': lambda: FakeResponse(401), '/big': ok(b'{"a": "' + b'x' * 100 + b'"}')})
+        with self.assertRaises(scrape.HTTPStatusError):
+            client.post_json(f'{API}/denied', {}, 30, 1000)
+        with self.assertRaisesRegex(ValueError, 'larger than'):
+            client.post_json(f'{API}/big', {}, 30, 50)
 
     def test_close_closes_every_connection(self):
         client = self.client({'/a.pdf': [redirect('https://cms.uni-marburg.de/a.pdf'), ok()]})

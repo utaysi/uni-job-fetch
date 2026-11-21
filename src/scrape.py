@@ -7,6 +7,7 @@ remote PDF basename. Downloads are returned as raw bytes for hashing/storage.
 
 import html
 import http.client
+import json
 import os
 import re
 import ssl
@@ -60,7 +61,16 @@ MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_PDF_BYTES = 25 * 1024 * 1024
 
 
+# The university keeps its central list of student jobs in an applicant system made
+# by BITE. Its page draws the list with a script that asks BITE's search API, and the
+# fetcher asks the same API. That one JSON request is the only one that may go to a
+# host outside the university (see KeepAliveClient.post_json).
+JOB_API_HOST = 'jobs.b-ite.com'
+MAX_API_BYTES = 5 * 1024 * 1024
+
+
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
+JSON_HEADERS = {**HEADERS, 'Content-Type': 'application/json', 'Accept': 'application/json'}
 REDIRECT_CODES = {301, 302, 303, 307, 308}
 MAX_REDIRECTS = 10
 
@@ -112,7 +122,7 @@ def _https_connection(host, port, timeout):
 
 
 class KeepAliveClient:
-    """GET and HEAD requests that reuse one open HTTPS connection per host.
+    """GET, HEAD and JSON POST requests that reuse one open HTTPS connection per host.
 
     urllib opens a new connection for every request. The university's servers hold
     back new connections that arrive in quick succession (1 to 5 seconds each), so a
@@ -120,7 +130,8 @@ class KeepAliveClient:
     connection the same requests take a few seconds.
 
     Every URL, including each redirect target, is checked with is_allowed_url before
-    it is requested, and every response body is capped at max_bytes.
+    it is requested, and every response body is capped at max_bytes. The one exception
+    is post_json, which only talks to BITE's job API and follows no redirects.
     """
 
     def __init__(self, connect=_https_connection, clock=time.monotonic):
@@ -146,6 +157,22 @@ class KeepAliveClient:
             return None
         return size if size >= 0 else None
 
+    def post_json(self, url, payload, timeout, max_bytes):
+        """Send payload as JSON to BITE's job API and return the decoded JSON answer.
+
+        Only https URLs on JOB_API_HOST are accepted, and a redirect is an error, so
+        this cannot be pointed anywhere else.
+        """
+        if not is_job_api_url(url):
+            raise ValueError(f'refusing to post to anything but the job API: {url}')
+        body = json.dumps(payload).encode('utf-8')
+        status, reason, _, data, _ = self._once('POST', url, timeout, max_bytes, body)
+        if status in REDIRECT_CODES:
+            raise ValueError(f'the job API answered with a redirect: {url}')
+        if not 200 <= status < 300:
+            raise HTTPStatusError(status, reason, url)
+        return json.loads(data.decode('utf-8'))
+
     def _request(self, method, url, timeout, max_bytes):
         """(body, Content-Length header) of the final answer, following checked redirects."""
         if not is_allowed_url(url):
@@ -167,7 +194,7 @@ class KeepAliveClient:
         for key in list(self._conns):
             self._drop(key)
 
-    def _once(self, method, url, timeout, max_bytes):
+    def _once(self, method, url, timeout, max_bytes, body=None):
         parts = urllib.parse.urlsplit(url)
         key = (parts.hostname, parts.port or 443)
         target = (parts.path or '/') + (f'?{parts.query}' if parts.query else '')
@@ -184,7 +211,7 @@ class KeepAliveClient:
                 else:
                     conn.connect()  # explicitly, so the handshake is timed on its own
                 sent = self._clock()
-                conn.request(method, target, headers=HEADERS)
+                conn.request(method, target, body=body, headers=HEADERS if body is None else JSON_HEADERS)
                 resp = conn.getresponse()
                 answered = self._clock()
                 data = resp.read(max_bytes + 1)
@@ -274,6 +301,12 @@ def is_allowed_url(url):
     host = (parts.hostname or '').lower()
     return (parts.scheme == 'https'
             and (host == ALLOWED_DOMAIN or host.endswith('.' + ALLOWED_DOMAIN)))
+
+
+def is_job_api_url(url):
+    """True for https URLs on BITE's job API host (JOB_API_HOST), and nothing else."""
+    parts = urllib.parse.urlsplit(url)
+    return parts.scheme == 'https' and (parts.hostname or '').lower() == JOB_API_HOST and not parts.port
 
 
 def absolute_url(href):
