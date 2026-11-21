@@ -21,7 +21,7 @@
 
 University job boards publish openings as a sprawl of PDF flyers with different layouts, departments, and formats. **uni-job-fetch** turns that mess into clean, structured, trackable data:
 
-- 🔎 **Fetch**: pulls new job-ad PDFs from the source and detects what's online, offline, or newly added.
+- 🔎 **Fetch**: pulls new job-ad PDFs from the department pages and the ads of the university's central job board (web pages, saved as PDFs), and detects what's online, offline, or newly added.
 - 🧩 **Parse**: extracts structured fields from each ad: department, position, working group, deadlines, pay, workload, contacts, and more.
 - ✅ **Review**: round-trips through Excel so a human can correct anything the parser flagged as uncertain.
 - 📊 **Visualize**: serves a dark, filterable dashboard with per-department breakdowns and a deadline timeline.
@@ -40,7 +40,7 @@ A single entry point opens an interactive menu backed by a local job repository.
 
 | Action | What it does |
 | --- | --- |
-| **Fetch new ads** | Scrapes the source, downloads new PDFs, and updates each ad's online/offline status. |
+| **Fetch new ads** | Scrapes the sources, downloads new PDFs (or prints the central job board's ad pages to PDF), and updates each ad's online/offline status. |
 | **Export to Excel** | Writes the full repository to a spreadsheet for human review. |
 | **Import Excel corrections** | Reads your edits back in and clears the *needs-review* flags. |
 | **Serve dashboard** | Boots the web dashboard locally. |
@@ -93,6 +93,8 @@ pip install -r requirements.txt
 # 3. Launch the interactive CLI
 python src/jobs.py
 ```
+
+Ads of the central job board are printed with Chrome or Chromium if one is installed (otherwise they are saved as plain PDFs); see [Where the ads come from](docs/TECHNICAL.md#where-the-ads-come-from).
 
 Then pick **Fetch new ads** to populate the repository, **Export to Excel** to review, and **Serve dashboard** to visualize.
 

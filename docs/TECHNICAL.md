@@ -9,7 +9,7 @@ Background detail for Uni Job Fetch that most users do not need. For everyday us
 src/      Python modules (run with `py src/jobs.py`)
 web/      dashboard page (index.html, app.js, tab icons, vendored Chart.js)
 data/     jobs.db, pdfs/, wheels/, backup/ (all generated or vendored; for hosting, a private git repo)
-tests/    Python unit tests (deadline, duration and hours detection, scraper)
+tests/    Python unit tests (deadline, duration and hours detection, scraper, central job board ads, fetch)
 worker/   Cloudflare Worker for the hosted dashboard (login check, notes/tags/review/deadline/duration/hours API, fetch button)
 deploy/   templates for the private data repo (wrangler config, workflow, .gitignore)
 docs/     these notes
@@ -28,13 +28,29 @@ All job ads live in a single deduplicated repository:
 - `data/pdfs/` - every job-ad PDF, stored once, named
   `<first-seen-date>_<original-name>_<count>.pdf`.
 
-Each ad is identified by the content hash of its PDF, so re-running a fetch never creates
-duplicates. Ads still found online stay `Online`; ads that disappear from the website are flipped
+Each ad is identified by the content hash of its PDF (for ads of the central job board, of
+its cleaned page, see below), so re-running a fetch never creates duplicates. Ads still found online stay `Online`; ads that disappear from the website are flipped
 to `Offline` (nothing is deleted).
 
 Your manual corrections from Excel are stored separately from the parsed values, so future
 fetches never overwrite them. Keep `job_ads.xlsx` at the project root next to the `data/`
 folder so the PDF links (which point at `data/pdfs/`) keep working.
+
+## Where the ads come from
+
+The fetcher reads two kinds of sources (`src/scrape.py`):
+
+- **The central job board.** The university's page for student jobs ("Studentische Hilfskraftstellen") no longer links PDFs. Since about June 2026 a script on it shows the list from the university's applicant system, made by BITE, and each ad is a web page on `stellenangebote.uni-marburg.de`. The fetcher asks BITE's search API (`jobs.b-ite.com`) the same question as that script, with the public listing key from the university's own script, and gets each ad's page address, ad ID and department. Departments get the same names as the subpages below (for example "Department 20 Medicine"), so the dashboard's department filter puts them together. Medicine posts its student jobs only here.
+- **The department subpages** (`SUBPAGES`): pages of departments and centres that link their ads as PDFs.
+
+Ads of the central board are saved as PDFs too, so they work like the others: the dashboard shows our own copy, the same extractor reads it, and it stays available after the ad goes offline. `src/posting.py` does this:
+
+1. It keeps only the ad from the page: text, headings and lists, without scripts, images, links or attributes.
+2. It identifies the ad by a hash of that cleaned content, not of the PDF, because a browser print differs on every run and a newer PyMuPDF could draw the plain PDF differently. Spacing around tags does not count, so only a change to the ad itself makes it a new ad.
+3. It prints the page with a headless Chrome, which gives the university's own layout (photo banner, icons, logos). It uses `chrome-headless-shell` if installed (Chrome's build for printing, without extensions), else `google-chrome` or Chromium, or the browser named in the `CHROME_PATH` environment variable. The browser runs in German, in a fresh profile, with its sandbox on, and is stopped after 60 seconds. GitHub's Ubuntu runners come with Google Chrome.
+4. It checks that the print shows the ad ID. If no browser is found, printing fails or the print does not show the ad, it saves a plain PDF made with PyMuPDF from the cleaned page instead, with the ad ID on one line and the field box as labels over values, the layout the extractor reads. After a browser timeout it saves plain PDFs for the rest of that fetch. The fetch log says which ads were printed and which were saved as plain PDFs.
+
+Like PDF links, a known ad page is only downloaded again when its size changed, or once a week.
 
 ## How deadlines are read
 
@@ -151,9 +167,11 @@ Clicking an ad on the hosted dashboard opens its deadline, duration and hours, r
 - **No other addresses.** The `*.workers.dev` address and preview URLs are disabled.
 - **Safe writes.** Changes must come from the dashboard itself (Origin check) as JSON, and all database queries use bound parameters. Notes are limited to 2,000 characters and tags to 30. Each person can make up to 300 changes a day.
 - **No script injection.** Everything from the ads or from users is escaped before it is shown, and a strict Content Security Policy only allows the dashboard's own scripts. The page loads nothing from other websites.
-- **Narrow fetcher.** The scraper only downloads `https` links on `uni-marburg.de`, checks every redirect before following it, caps every download (5 MB per page, 25 MB per PDF), and runs on a temporary GitHub machine. `tests/test_scrape.py` covers these checks.- **Login list for the owner only.** The Worker answers `/api/logins` only for emails listed in `ADMIN_EMAILS`; everyone else gets 403, whatever the page shows. Without the setting nobody can read it.
+- **Narrow fetcher.** The scraper only downloads `https` links on `uni-marburg.de`, checks every redirect before following it, caps every download (5 MB per page, 25 MB per PDF), and runs on a temporary GitHub machine. The one exception is the search request for the central job board, which may only go to BITE's API (`https://jobs.b-ite.com`), follows no redirect and is capped at 5 MB. `tests/test_scrape.py` covers these checks.
+- **Printing in a sandbox.** Central job board ads are printed only from university addresses, by a headless Chrome with its sandbox on, in a fresh profile that is deleted afterwards. The browser loads the page's images and styles from BITE's servers. The stored PDF is checked before it is kept, and `tests/test_posting.py` covers the cleaning, the checks and the fallback.
+- **Login list for the owner only.** The Worker answers `/api/logins` only for emails listed in `ADMIN_EMAILS`; everyone else gets 403, whatever the page shows. Without the setting nobody can read it.
 - **Small secrets.** The Fetch now button uses a GitHub token that can only start and view workflow runs in the data repo. It cannot read or change code or data.
-- **Secrets only where needed.** In the daily workflow, the Cloudflare token is passed only to the three `wrangler` steps, not to the steps that install packages or read downloaded PDFs. Python packages are installed from `requirements.lock` with pinned hashes, so a newly published (possibly malicious) package version never runs next to the secrets.
+- **Secrets only where needed.** In the daily workflow, the Cloudflare token is passed only to the three `wrangler` steps, not to the steps that install packages, read downloaded PDFs or print the central job board's ads. Python packages are installed from `requirements.lock` with pinned hashes, so a newly published (possibly malicious) package version never runs next to the secrets.
 
 ### One-time setup
 
